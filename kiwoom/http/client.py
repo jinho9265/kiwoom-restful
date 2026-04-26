@@ -93,13 +93,17 @@ class Client:
         }
         async with self._session.post(self.host + endpoint, headers=headers, json=data) as res:
             # aiohttp 오류를 무시하고(json 파싱을 위해) 텍스트를 먼저 받아옵니다.
-            body = await res.json(content_type=None)
+            try:
+                body = await res.json(content_type=None)
+            except Exception:
+                body = await res.text()
+
             resp = Response(res.url, res.status, res.headers, body)
             if res.status >= 400:
                 raise RuntimeError(f"토큰 발급 실패 [{res.status}]: {body}")
 
         # Set token
-        if "token" not in body:
+        if not isinstance(body, dict) or "token" not in body:
             msg = dumps(self, endpoint, api_id, headers, data, resp)
             raise RuntimeError(f"Failed to get token: {msg}")
         token = body["token"]
