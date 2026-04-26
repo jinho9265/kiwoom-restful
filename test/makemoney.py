@@ -185,7 +185,7 @@ async def main():
                     'name': stock_info.get('stk_nm'),
                     'ticker': stock_info.get('stk_cd'),
                     'current_price': abs(int(stock_info.get('cur_prc'))),
-                    'change_rate': float(stock_info.get('flu_rt', '0')) / 1000,
+                    'change_rate': float(stock_info.get('flu_rt', '0')),
                     'volume': int(stock_info.get('trde_qty'))
                 }
 
