@@ -6,7 +6,6 @@ import time
 import threading
 import pytz
 import yfinance as yf
-import pandas as pd
 import myConfig
 from myTelegram import TelegramBot
 
@@ -16,6 +15,9 @@ class MarketMonitor:
         self.bot = telegram_bot
         # KST(한국 표준시) 타임존 설정
         self.kst = pytz.timezone('Asia/Seoul')
+
+        if myConfig.ENABLE_PERIODIC_MARKET_MONITOR:
+            self.start_background_thread()
 
     def fetch_latest_fred_data(self, series_id):
         """FRED API를 사용하여 가장 최신 값을 반환합니다."""
@@ -184,7 +186,6 @@ class MarketMonitor:
         while True:
             now_kst = datetime.datetime.now(self.kst)
 
-            # 매 1분마다 실행
             if now_kst.minute == 0 and last_run_hour != now_kst.hour and not (0 <= now_kst.hour <= 6):
             #if last_run_minute != now_kst.minute:
                 self.job()

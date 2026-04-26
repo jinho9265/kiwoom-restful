@@ -352,7 +352,7 @@ class API(Client):
         def callback_on_login(msg: dict):
             if msg.get("return_code") != 0:
                 raise RuntimeError(f"Login failed with return_code not zero, {msg}.")
-            print(msg)
+            print("키움 REST API Login 성공!")
 
         self.add_callback_on_real_data(real_type="LOGIN", callback=callback_on_login)
 
