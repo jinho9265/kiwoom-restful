@@ -68,8 +68,13 @@ class Client:
 
         # Establish HTTP session
         self._ready_event.clear()
+
+        session_headers = dict(self._headers) if self._headers else {}
+        if not any(k.lower() == "user-agent" for k in session_headers):
+            session_headers["User-Agent"] = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+
         self._session = ClientSession(
-            headers=self._headers,
+            headers=session_headers,
             timeout=aiohttp.ClientTimeout(
                 total=HTTP_TOTAL_TIMEOUT,
                 sock_connect=HTTP_CONNECT_TIMEOUT,
