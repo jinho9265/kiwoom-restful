@@ -28,6 +28,11 @@ dependencies = [
     "msgspec>=0.19.0",
     "orjson>=3.11.3",
     "aiohttp[speedups]>=3.12.15",
+    "python-telegram-bot>=21.0",
+    "python-dotenv>=1.2.2",
+    "requests>=2.32.5",
+    "pytz>=2026.1.post1",
+    "yfinance>=1.2.0"
 ]
 
 [project.urls]

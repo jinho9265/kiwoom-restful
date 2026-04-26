@@ -375,8 +375,15 @@ class API(Client):
                 break
 
             try:
-                msg = decoder.decode(raw)  # partially decoded for speed up
-                if msg.trnm == "REAL":
+                # 1. REAL 타입 여부 확인 및 고속 디코딩 시도
+                is_real = False
+                try:
+                    msg = decoder.decode(raw)
+                    is_real = (msg.trnm == "REAL")
+                except Exception:
+                    pass  # msgspec 스키마(RealType)와 불일치하는 일반 응답
+
+                if is_real:
                     for data in msg.data:
                         asyncio.create_task(
                             self._callbacks[data.type](
@@ -385,11 +392,14 @@ class API(Client):
                         )
                     continue
 
+                # 2. 스키마 불일치 디코딩 실패 또는 REAL이 아닌 경우 (CNSRLST 등 일반 JSON)
                 dic = orjson.loads(raw)
-                asyncio.create_task(self._callbacks[msg.trnm](dic))
+                if trnm := dic.get("trnm"):
+                    asyncio.create_task(self._callbacks[trnm](dic))
 
             except Exception as err:
-                raise Exception("Failed to handling websocket data.") from err
+                # 백그라운드 수신 루프가 종료되지 않도록 예외는 로깅만 수행
+                print(f"Failed to handling websocket data: {err}")
 
             finally:
                 self.queue.task_done()
@@ -474,3 +484,50 @@ class API(Client):
                 "data": [{"item": codes, "type": type}],
             }
         )
+
+    async def conditional_search_list(self) -> None:
+        """
+        조건 검색 리스트를 요청합니다.
+        """
+        await self.socket.send(
+            {'trnm': 'CNSRLST'},
+        )
+
+    async def conditional_search_request(self, seq: str, search_type: str, stex_tp: str = "K") -> None:
+        """
+        조건 검색을 요청합니다.
+
+        Args:
+            seq (str): 조건검색식 일련번호
+            search_type (str): 0: 조건검색 1: 조건검색 + 실시간조건검색
+            stex_tp (str): K: KRX (국내주식)
+        """
+        await self.socket.send(
+            {
+                "trnm": "CNSRREQ",
+                "seq": seq,
+                "search_type": search_type,
+                "stex_tp": stex_tp,
+            },
+        )
+
+    async def get_stock_info(self, stock_code: str) -> dict:
+        """
+        주어진 종목 코드에 대해 'ka10001' API 요청을 하고 응답을 반환합니다.
+
+        Args:
+            stock_code (str): 조회할 주식 종목코드
+
+        Returns:
+            dict: 주식 정보 응답
+
+        """
+        endpoint = "/api/dostk/stkinfo"
+        api_id = "ka10001"
+
+        res = await self.request(endpoint, api_id, data={"stk_cd": stock_code})
+        body = res.json()
+        if body["return_code"] != 0:
+            print(f"invalid return_code: {body['return_code']}")
+            return None
+        return body

@@ -75,7 +75,11 @@ class Client:
                 sock_connect=HTTP_CONNECT_TIMEOUT,
                 sock_read=HTTP_READ_TIMEOUT,
             ),
-            connector=aiohttp.TCPConnector(limit=HTTP_TCP_CONNECTORS, enable_cleanup_closed=True),
+            connector=aiohttp.TCPConnector(
+                limit=HTTP_TCP_CONNECTORS, 
+                enable_cleanup_closed=True,
+                resolver=aiohttp.ThreadedResolver(),
+            ),
         )
 
         # Request token
