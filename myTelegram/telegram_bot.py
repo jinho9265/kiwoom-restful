@@ -74,7 +74,7 @@ class TelegramBot:
         if self.app:
             bot_commands = [telegram.BotCommand(cmd, desc) for cmd, desc in commands]
             await self.app.bot.set_my_commands(bot_commands)
-            print("텔레그램 메뉴 버튼 설정 완료.")
+            #print("텔레그램 메뉴 버튼 설정 완료.")
 
     def add_command_handler(self, command: str, handler):
         """
