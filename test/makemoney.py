@@ -46,7 +46,7 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
         # TODO: 임시 자산 데이터 (추후 실제 계좌 조회 데이터로 교체 필요)
         asset_data = {'cash': 10000000, 'total_asset': 10000000}
 
-        # TODO: 3개까지 query
+        # TODO: Query할 종목 개수 선정
         for market_data in market_data_list[:3]:
             # 주의: get_recommendation 내부에서 requests.post(동기)를 사용하므로
             # 이벤트 루프 차단을 막기 위해 백그라운드 스레드에서 실행 (asyncio.to_thread)

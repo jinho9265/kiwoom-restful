@@ -18,6 +18,8 @@ class AIEngine:
         if myConfig.SKIP_REQUEST_GEMINI:
             return None
 
+        # TODO: Prompt 고도화
+        # TODO: 매수/매도 추천 강도, 계좌 상태에 포트폴리오 반영
         system_instruction = (
             "당신은 전문 주식 투자 분석가입니다. 제공된 한국 시장 데이터와 계좌 상태를 분석하여 "
             "매수, 매도, 또는 관망(Hold) 중 하나를 추천하고, 그 이유를 기술적/기본적 분석 관점에서 설명하세요."

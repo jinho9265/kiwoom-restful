@@ -24,7 +24,6 @@ requires-python = ">=3.10"
 packages = "kiwoom"
 dependencies = [
     "pandas>=2",
-    "numpy>=2",
     "msgspec>=0.19.0",
     "orjson>=3.11.3",
     "aiohttp[speedups]>=3.12.15",
@@ -64,7 +63,7 @@ line-length = 100
 # PEP8(E,W,F), Import 정렬(I), 기본 버그패턴(B)
 select = ["E", "F", "W", "I", "B"]
 ignore = [
-    "D100",  # public module docstring 
+    "D100",  # public module docstring
     "D104",  # public package docstring
     "D107",  # docstring in __init__
     "E731",  # lambda 제한 해제
