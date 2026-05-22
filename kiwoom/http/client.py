@@ -37,14 +37,14 @@ class Client:
         self._auth: str = ""
         self._appkey: str = appkey
         self._secretkey: str = secretkey
-        self._headers: Optional[dict] = None
+        self._headers: Optional[dict] = None  # connect headers
 
         self._state_http = State.CLOSED
         self._ready_event = asyncio.Event()
         self._limiter: RateLimiter = RateLimiter()
         self._session: ClientSession = None
 
-    async def connect(self, appkey: str, secretkey: str, headers: Optional[dict] = None) -> None:
+    async def _connect(self, appkey: str, secretkey: str, headers: Optional[dict] = None) -> None:
         """
         Connect to Kiwoom REST API server and receive token.
 
@@ -59,7 +59,7 @@ class Client:
         if isfile(secretkey):
             with open(secretkey, "r") as f:
                 self._secretkey = f.read().strip()
-        if headers:
+        if headers is not None:
             self._headers = headers
 
         # Already connected
@@ -251,7 +251,7 @@ class Client:
                 case 3:
                     # 3 : Token Expired
                     print("Token expired, trying to refresh token...")
-                    await self.connect(self._appkey, self._secretkey)
+                    await self._connect(self._appkey, self._secretkey, self._headers)
                     return await self.request(endpoint, api_id, headers=headers, data=data)
 
         # Request Failure
