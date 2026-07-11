@@ -169,13 +169,16 @@ class TelegramBot:
         self.add_command_handler("start", self.start_command)
         self.add_command_handler("ask", self.ask_command)
         self.add_command_handler("defcon", self.defcon_command)
+        self.add_command_handler("balance", self.balance_command)
+        self.add_command_handler("portfolio", self.balance_command)
         self.add_message_handler(self.handle_text_message)
 
         # 텔레그램 기본 '메뉴' 버튼에 등록
         await self.set_menu_commands([
             ("start", "시작 및 키보드 버튼 표시"),
             ("defcon", "시장 지표 및 데프콘 계산"),
-            ("ask", "종목 분석 요청 (예: /ask 삼성전자)")
+            ("ask", "종목 분석 요청 (예: /ask 삼성전자)"),
+            ("balance", "실시간 자산 및 포트폴리오 조회")
         ])
 
     async def start_command(self, update, context):
@@ -416,6 +419,167 @@ class TelegramBot:
         except Exception as e:
             self.logger.error(f"구글 뉴스 RSS 수집 실패 ({stock_name}): {e}")
         return []
+
+    async def balance_command(self, update, context):
+        """실시간 계좌 잔고 및 포트폴리오를 조회하고 파이 차트로 전송합니다."""
+        await update.message.reply_text("💼 실시간 계좌 정보 및 보유 종목 잔고를 조회 중입니다. 잠시만 기다려주세요...")
+        
+        # 1. API를 통해 데이터 조회
+        deposit_data = None
+        portfolio_data = None
+        try:
+            if self.kiwoom_bot and self.kiwoom_bot.api:
+                deposit_data = await self.kiwoom_bot.api.get_deposit_info()
+                portfolio_data = await self.kiwoom_bot.api.get_balance_portfolio()
+        except Exception as e:
+            self.logger.error(f"실시간 잔고 조회 중 오류: {e}")
+            
+        # 2. 파싱 및 폴백(Fallback) 처리
+        is_mock = False
+        holdings = []
+        cash = 0
+        total_buy = 0
+        total_eval = 0
+        total_pl = 0
+        total_rt = 0.0
+
+        # API 데이터를 정상 수신한 경우 파싱 시도
+        if deposit_data and deposit_data.get("return_code") == 0 and portfolio_data and portfolio_data.get("return_code") == 0:
+            try:
+                dep_body = deposit_data.get("body", {})
+                cash = int(dep_body.get("dstd_dps", dep_body.get("d2_dps", 0)))
+                
+                port_body = portfolio_data.get("body", {})
+                raw_holdings = port_body.get("acnt_eval_bal_array", [])
+                
+                for item in raw_holdings:
+                    stk_cd = item.get("stk_cd", "")
+                    stk_nm = item.get("stk_nm", "")
+                    qty = int(item.get("hold_qty", item.get("qty", 0)))
+                    buy_uv = int(item.get("buy_uv", item.get("buy_dprc", 0)))
+                    cur_prc = int(item.get("cur_prc", item.get("cur_dprc", 0)))
+                    eval_pl = int(item.get("eval_pl", item.get("eval_pft_loss_amt", 0)))
+                    eval_pl_rt = float(item.get("eval_pl_rt", item.get("eval_pft_loss_rt", 0.0)))
+                    
+                    if qty > 0:
+                        holdings.append({
+                            "code": stk_cd,
+                            "name": stk_nm,
+                            "qty": qty,
+                            "buy_price": buy_uv,
+                            "current_price": cur_prc,
+                            "eval_pl": eval_pl,
+                            "eval_pl_rt": eval_pl_rt,
+                            "eval_amt": qty * cur_prc
+                        })
+                
+                total_buy = sum(h["qty"] * h["buy_price"] for h in holdings)
+                total_eval = sum(h["eval_amt"] for h in holdings)
+                total_pl = total_eval - total_buy
+                total_rt = (total_pl / total_buy * 100) if total_buy > 0 else 0.0
+                
+            except Exception as parse_err:
+                self.logger.error(f"잔고 데이터 파싱 중 에러: {parse_err}. 가상 데이터로 폴백합니다.")
+                is_mock = True
+
+        # 보유 종목이 아예 없거나 파싱 오류난 경우 폴백
+        if not holdings or is_mock:
+            is_mock = True
+            cash = 3500000 # 350만원 예수금
+            holdings = [
+                {"code": "005930", "name": "삼성전자", "qty": 50, "buy_price": 72000, "current_price": 74500, "eval_pl": 125000, "eval_pl_rt": 3.47, "eval_amt": 50 * 74500},
+                {"code": "000660", "name": "SK하이닉스", "qty": 15, "buy_price": 180000, "current_price": 185000, "eval_pl": 75000, "eval_pl_rt": 2.78, "eval_amt": 15 * 185000},
+                {"code": "005380", "name": "현대차", "qty": 10, "buy_price": 250000, "current_price": 242500, "eval_pl": -75000, "eval_pl_rt": -3.00, "eval_amt": 10 * 242500}
+            ]
+            total_buy = sum(h["qty"] * h["buy_price"] for h in holdings)
+            total_eval = sum(h["eval_amt"] for h in holdings)
+            total_pl = total_eval - total_buy
+            total_rt = (total_pl / total_buy * 100) if total_buy > 0 else 0.0
+
+        # 3. Matplotlib를 사용해 다크 테마 포트폴리오 파이 차트 생성
+        chart_path = self.render_portfolio_pie(cash, holdings)
+        
+        # 4. 텔레그램 전송
+        mock_tag = " (⚠️ 모의 데모 잔고)" if is_mock else ""
+        summary_msg = (
+            f"💼 *[실시간 계좌 잔고 및 포트폴리오 요약]{mock_tag}*\n"
+            f"- *총 자산*: {total_eval + cash:,.0f}원\n"
+            f"- *예수금 (현금)*: {cash:,.0f}원\n"
+            f"- *총 매입 금액*: {total_buy:,.0f}원\n"
+            f"- *총 평가 금액*: {total_eval:,.0f}원\n"
+            f"- *총 평가 손익*: *{total_pl:+,.0f}원*\n"
+            f"- *총 수익률*: *{total_rt:+.2f}%*\n\n"
+            f"📈 *보유 종목 현황*\n"
+        )
+        
+        for h in holdings:
+            sign = "+" if h["eval_pl"] >= 0 else ""
+            summary_msg += (
+                f"• *{h['name']}* ({h['code']}): {h['qty']}주\n"
+                f"   └ 매입: {h['buy_price']:,.0f}원 | 현재: {h['current_price']:,.0f}원\n"
+                f"   └ 평가금: {h['eval_amt']:,.0f}원 | 손익: {sign}{h['eval_pl']:,.0f}원 ({sign}{h['eval_pl_rt']:.2f}%)\n"
+            )
+
+        if chart_path and os.path.exists(chart_path):
+            self.send_photo(chart_path, caption=f"*💼 실시간 포트폴리오 자산 배분 비중*{mock_tag}")
+            await asyncio.sleep(3)
+        self.send_message(summary_msg)
+
+    def render_portfolio_pie(self, cash, holdings):
+        """보유 현황을 Pie Chart 이미지로 렌더링하고 경로를 리턴합니다."""
+        import matplotlib
+        matplotlib.use('Agg')
+        import matplotlib.pyplot as plt
+        import os
+        
+        try:
+            # 데이터 취합
+            labels = ["CASH"]
+            sizes = [cash]
+            
+            for h in holdings:
+                labels.append(h["name"])
+                sizes.append(h["eval_amt"])
+                
+            # 다크 테마
+            plt.style.use('dark_background')
+            fig, ax = plt.subplots(figsize=(6, 5))
+            
+            # 은은하고 세련된 색상 조합
+            colors = ['#4f5b66', '#268bd2', '#859900', '#dc322f', '#b58900', '#cb4b16', '#6c71c4']
+            if len(sizes) > len(colors):
+                colors = colors * (len(sizes) // len(colors) + 1)
+            colors = colors[:len(sizes)]
+            
+            # 차트 그리기
+            wedges, texts, autotexts = ax.pie(
+                sizes, 
+                labels=labels, 
+                autopct='%1.1f%%', 
+                startangle=90, 
+                colors=colors,
+                textprops=dict(color="w"),
+                wedgeprops=dict(width=0.4, edgecolor='black', linewidth=1.5) # 도넛 모양
+            )
+            
+            plt.setp(autotexts, size=9, weight="bold")
+            plt.setp(texts, size=10)
+            
+            # 중앙 텍스트 (총자산 표시)
+            total_assets = cash + sum(h["eval_amt"] for h in holdings)
+            ax.text(0, 0, f"Total\n{total_assets/10000:,.0f}만원", ha='center', va='center', fontsize=11, color='w', weight='bold')
+            
+            plt.title("Portfolio Asset Allocation", color='white', fontsize=13, pad=15, weight='bold')
+            plt.tight_layout()
+            
+            os.makedirs("tmp_charts", exist_ok=True)
+            chart_path = "tmp_charts/portfolio_pie.png"
+            plt.savefig(chart_path, dpi=150, transparent=True)
+            plt.close()
+            return chart_path
+        except Exception as e:
+            self.logger.error(f"포트폴리오 Pie Chart 렌더링 실패: {e}", exc_info=True)
+            return None
 
 if __name__ == '__main__':
     bot = TelegramBot()

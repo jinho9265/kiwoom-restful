@@ -535,3 +535,37 @@ class API(Client):
             logger.warning(f"get_stock_info failed with invalid return_code: {body['return_code']} for stock_code: {stock_code}")
             return None
         return body
+
+    async def get_deposit_info(self) -> dict:
+        """
+        예수금 상세 현황(kt00001)을 요청하여 반환합니다.
+        """
+        endpoint = "/api/dostk/acnt"
+        api_id = "kt00001"
+        data = {
+            "acnt_no": "",
+            "pwd": "",
+            "qry_tp": "2"
+        }
+        res = await self.request(endpoint, api_id, data=data)
+        body = res.json()
+        return body
+
+    async def get_balance_portfolio(self) -> dict:
+        """
+        계좌 평가 잔고 내역(kt00018)을 요청하여 반환합니다.
+        """
+        endpoint = "/api/dostk/acnt"
+        api_id = "kt00018"
+        data = {
+            "acnt_no": "",
+            "pwd": "",
+            "crd_deal_tp": "00",
+            "base_uv_tp": "1",
+            "eval_uv_tp": "1",
+            "cont_yn": "N",
+            "next_key": ""
+        }
+        res = await self.request(endpoint, api_id, data=data)
+        body = res.json()
+        return body
