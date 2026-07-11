@@ -72,6 +72,9 @@ async def main():
         handlers=[logging.FileHandler('makemoney.log', encoding='utf-8'), logging.StreamHandler()]
     )
 
+    # 텔레그램 봇의 getUpdates 폴링으로 인한 httpx 로그가 과도하게 쌓이는 것을 방지
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
     telegram_bot = TelegramBot()
     ai_engine = AIEngine()
     market_monitor = MarketMonitor(telegram_bot)
