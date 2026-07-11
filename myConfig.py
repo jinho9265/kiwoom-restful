@@ -25,7 +25,7 @@ FRED_API_KEY = os.getenv("FRED_API_KEY")
 
 # Gemini API
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL_NAME = "gemini-3-flash-preview"
+GEMINI_MODEL_NAME = os.getenv("GEMINI_MODEL_NAME", "gemini-3-flash-preview")
 
 # API URL 설정 (실전투자)
 API_URL = "https://api.kiwoom.com"

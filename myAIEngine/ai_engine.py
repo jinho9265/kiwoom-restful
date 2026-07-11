@@ -55,7 +55,8 @@ class AIEngine:
 
         for i in range(6):
             try:
-                async with aiohttp.ClientSession() as session:
+                connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+                async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.post(self.api_url, json=payload, timeout=30) as response:
                         response.raise_for_status()
                         result = await response.json()
@@ -160,7 +161,8 @@ class AIEngine:
 
         for i in range(6):
             try:
-                async with aiohttp.ClientSession() as session:
+                connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+                async with aiohttp.ClientSession(connector=connector) as session:
                     async with session.post(self.api_url, json=payload, timeout=30) as response:
                         response.raise_for_status()
                         result = await response.json()

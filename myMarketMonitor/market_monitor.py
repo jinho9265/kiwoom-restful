@@ -341,6 +341,7 @@ class MarketMonitor:
             ai_report = await self.ai_engine.get_defcon_report(indicators, defcon_level)
             if ai_report:
                 self.bot.send_message(ai_report)
+                await asyncio.sleep(3)
                 print("AI 매크로 브리핑 메시지 전송 완료.")
                 return
 
@@ -356,6 +357,7 @@ class MarketMonitor:
         message += f"- 버핏 지수(SPX/GDP): {indicators.get('BUFFETT', 'N/A'):.2f}%\n" if indicators.get('BUFFETT') is not None else "- 버핏 지수: 데이터 없음\n"
 
         self.bot.send_message(message)
+        await asyncio.sleep(3)
         print("시장 지표 메시지 전송 완료.")
 
     def run_scheduler(self):
