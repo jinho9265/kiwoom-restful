@@ -350,12 +350,12 @@ class MarketMonitor:
             unrate = indicators.get('UNRATE')
             buffett = indicators.get('BUFFETT')
 
-            # 0~100 리스크 지수화 (높을수록 위기)
+            # 0~100 리스크 지수화 (높을수록 위기, 실제 DEFCON 점수 임계값에 맞춰 동기화)
             vix_val = max(0.0, min(100.0, ((vix - 10.0) / 30.0) * 100.0)) if vix is not None else 50.0
-            t10y2y_val = max(0.0, min(100.0, ((0.2 - t10y2y) / 0.8) * 100.0)) if t10y2y is not None else 50.0
-            hy_val = max(0.0, min(100.0, ((hy_spread - 2.5) / 4.5) * 100.0)) if hy_spread is not None else 50.0
-            unrate_val = max(0.0, min(100.0, ((unrate - 3.4) / 3.1) * 100.0)) if unrate is not None else 50.0
-            buffett_val = max(0.0, min(100.0, ((buffett - 14.0) / 11.0) * 100.0)) if buffett is not None else 50.0
+            t10y2y_val = max(0.0, min(100.0, ((0.5 - t10y2y) / 1.0) * 100.0)) if t10y2y is not None else 50.0
+            hy_val = max(0.0, min(100.0, ((hy_spread - 3.0) / 3.0) * 100.0)) if hy_spread is not None else 50.0
+            unrate_val = max(0.0, min(100.0, ((unrate - 3.5) / 2.5) * 100.0)) if unrate is not None else 50.0
+            buffett_val = max(0.0, min(100.0, ((buffett - 16.0) / 6.0) * 100.0)) if buffett is not None else 50.0
 
             stats = [vix_val, t10y2y_val, hy_val, unrate_val, buffett_val]
 
