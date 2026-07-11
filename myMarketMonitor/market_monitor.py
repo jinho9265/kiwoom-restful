@@ -10,8 +10,9 @@ import myConfig
 from myTelegram import TelegramBot
 
 class MarketMonitor:
-    def __init__(self, telegram_bot):
+    def __init__(self, telegram_bot, ai_engine=None):
         self.bot = telegram_bot
+        self.ai_engine = ai_engine
         # KST(한국 표준시) 타임존 설정
         self.kst = pytz.timezone('Asia/Seoul')
 
@@ -101,6 +102,18 @@ class MarketMonitor:
             indicators['BUFFETT'] = (spx / gdp) * 100
         else:
             indicators['BUFFETT'] = None
+
+        # 7. 원/달러 환율 (USDKRW=X)
+        indicators['USDKRW'] = self.fetch_latest_yahoo_data("USDKRW=X")
+
+        # 8. KOSPI 지수 (^KS11)
+        indicators['KOSPI'] = self.fetch_latest_yahoo_data("^KS11")
+
+        # 9. 나스닥 지수 (^IXIC)
+        indicators['NASDAQ'] = self.fetch_latest_yahoo_data("^IXIC")
+
+        # 10. WTI 유가 (CL=F)
+        indicators['WTI'] = self.fetch_latest_yahoo_data("CL=F")
 
         return indicators
 
@@ -322,6 +335,14 @@ class MarketMonitor:
         indicators = self.get_market_indicators()
         defcon_level = self.calculate_defcon(indicators)
 
+        if self.ai_engine:
+            print("AIEngine을 통한 AI 매크로 브리핑(DEFCON) 보고서 생성을 시작합니다...")
+            ai_report = self.ai_engine.get_defcon_report(indicators, defcon_level)
+            if ai_report:
+                self.bot.send_message(ai_report)
+                print("AI 매크로 브리핑 메시지 전송 완료.")
+                return
+
         message = f"🚨 [일일 시장 점검] 오늘의 DEFCON 레벨: {defcon_level:.1f} 🚨\n"
         message += "(1: 최고 위험 ~ 5: 평화)\n\n"
 
@@ -359,6 +380,12 @@ class MarketMonitor:
         thread.start()
 
 if __name__ == "__main__":
-    marketMonitor = MarketMonitor(TelegramBot())
+    try:
+        from myAIEngine.ai_engine import AIEngine
+        ai = AIEngine()
+    except Exception as e:
+        print(f"AIEngine 로드 실패(기본 텍스트 리포트 사용): {e}")
+        ai = None
+    marketMonitor = MarketMonitor(TelegramBot(), ai)
     marketMonitor.job()
 

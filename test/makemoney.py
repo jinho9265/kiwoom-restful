@@ -77,7 +77,7 @@ async def main():
 
     telegram_bot = TelegramBot()
     ai_engine = AIEngine()
-    market_monitor = MarketMonitor(telegram_bot)
+    market_monitor = MarketMonitor(telegram_bot, ai_engine)
 
     async with Bot(REAL, myConfig.KIWOOM_APP_KEY, myConfig.KIWOOM_SECRET_KEY) as bot:
         await telegram_bot.setup_handlers(bot, ai_engine, market_monitor)
