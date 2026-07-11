@@ -39,10 +39,11 @@ class TelegramBot:
         # getLogger()는 이미 설정된 로거가 있다면 그 인스턴스를 반환합니다.
         self.logger = logging.getLogger(__name__)
 
-    def send_message(self, message):
+    def send_message(self, message, parse_mode="Markdown"):
         """
         지정된 채팅 ID로 메시지를 보냅니다.
         :param message: 보낼 메시지 문자열
+        :param parse_mode: 텍스트 포맷 옵션 (Markdown, HTML 등)
         """
         if not self.token:
             self.logger.warning("텔레그램 봇 토큰이 없어 메시지를 보낼 수 없습니다.")
@@ -53,8 +54,12 @@ class TelegramBot:
                 # 쉼표로 구분된 여러 채팅 ID를 리스트로 분리합니다.
                 chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
                 for chat_id in chat_ids:
-                    await self.app.bot.send_message(chat_id=chat_id, text=message)
-                self.logger.info(f"텔레그램 메시지 발송 성공: {message}")
+                    try:
+                        await self.app.bot.send_message(chat_id=chat_id, text=message, parse_mode=parse_mode)
+                    except Exception as parse_err:
+                        self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
+                        await self.app.bot.send_message(chat_id=chat_id, text=message)
+                self.logger.info(f"텔레그램 메시지 발송 성공 (포맷: {parse_mode})")
             except Exception as e:
                 self.logger.error(f"텔레그램 메시지 발송 실패: {e}")
                 self.logger.error("==================================================")
@@ -145,7 +150,8 @@ class TelegramBot:
             "반갑습니다! 키움증권 AI 봇입니다.\n"
             "아래 버튼을 누르거나 좌측 하단의 '메뉴'를 이용해 명령을 내려주세요.\n"
             "*(/ask 버튼을 누른 후 이어서 종목명을 입력하시면 됩니다)*",
-            reply_markup=reply_markup
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
         )
 
     async def ask_command(self, update, context):
