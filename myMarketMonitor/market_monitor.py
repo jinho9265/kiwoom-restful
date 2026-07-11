@@ -331,19 +331,109 @@ class MarketMonitor:
         defcon = max(1.0, min(5.0, defcon))
         return round(defcon, 1)
 
+    def generate_dashboard_chart(self, indicators, defcon_level):
+        """FRED & Yahoo Finance 지표를 기반으로 다크테마 매크로 레이더 차트를 생성합니다."""
+        try:
+            import matplotlib
+            matplotlib.use('Agg') # GUI 없이 파일 저장용 백엔드 설정
+            import matplotlib.pyplot as plt
+            import numpy as np
+            import os
+
+            labels = ['VIX', 'T10Y2Y', 'HY-SPREAD', 'UNRATE', 'BUFFETT']
+            num_vars = len(labels)
+
+            # 지표 데이터 추출
+            vix = indicators.get('VIX')
+            t10y2y = indicators.get('T10Y2Y')
+            hy_spread = indicators.get('HY_SPREAD')
+            unrate = indicators.get('UNRATE')
+            buffett = indicators.get('BUFFETT')
+
+            # 0~100 리스크 지수화 (높을수록 위기)
+            vix_val = max(0.0, min(100.0, ((vix - 10.0) / 30.0) * 100.0)) if vix is not None else 50.0
+            t10y2y_val = max(0.0, min(100.0, ((0.2 - t10y2y) / 0.8) * 100.0)) if t10y2y is not None else 50.0
+            hy_val = max(0.0, min(100.0, ((hy_spread - 2.5) / 4.5) * 100.0)) if hy_spread is not None else 50.0
+            unrate_val = max(0.0, min(100.0, ((unrate - 3.4) / 3.1) * 100.0)) if unrate is not None else 50.0
+            buffett_val = max(0.0, min(100.0, ((buffett - 14.0) / 11.0) * 100.0)) if buffett is not None else 50.0
+
+            stats = [vix_val, t10y2y_val, hy_val, unrate_val, buffett_val]
+
+            # 레이더 차트의 원형 닫기를 위한 종점 처리
+            angles = np.linspace(0, 2 * np.pi, num_vars, endpoint=False).tolist()
+            stats += stats[:1]
+            angles += angles[:1]
+
+            # 피규어 생성 및 어두운 스타일 지정
+            fig, ax = plt.subplots(figsize=(5.5, 5.5), subplot_kw=dict(polar=True))
+            fig.patch.set_facecolor('#1c1c1e') # 다크 테마 배경
+            ax.set_facecolor('#2c2c2e')
+            ax.spines['polar'].set_color('#48484a')
+
+            # 그리드선 설정
+            ax.xaxis.grid(True, color='#48484a', linestyle='--')
+            ax.yaxis.grid(True, color='#3a3a3c', linestyle=':')
+
+            # 각도 보정 및 시계방향 진행
+            ax.set_theta_offset(np.pi / 2)
+            ax.set_theta_direction(-1)
+
+            # 레이블 및 틱 설정
+            plt.xticks(angles[:-1], labels, color='#ffffff', size=10, fontweight='bold')
+            ax.set_rlabel_position(0)
+            plt.yticks([25, 50, 75, 100], ["25", "50", "75", "100"], color="#8e8e93", size=8)
+            plt.ylim(0, 100)
+
+            # 데프콘 단계별 색상 지정
+            if defcon_level <= 2.0:
+                color = '#ff3b30' # 위험 (Red)
+            elif defcon_level <= 3.5:
+                color = '#ffcc00' # 주의 (Yellow)
+            else:
+                color = '#34c759' # 안정 (Green)
+
+            # 그리기 및 면 채우기
+            ax.plot(angles, stats, color=color, linewidth=2, linestyle='solid')
+            ax.fill(angles, stats, color=color, alpha=0.25)
+
+            # 중심에 DEFCON 등급 원형 배지 표시
+            ax.text(0, 0, f"DEFCON\n{defcon_level:.1f}", color='#ffffff', size=14, 
+                    fontweight='bold', ha='center', va='center',
+                    bbox=dict(boxstyle="circle,pad=0.4", fc="#1c1c1e", ec=color, lw=2.5))
+
+            os.makedirs("tmp_charts", exist_ok=True)
+            dashboard_path = "tmp_charts/defcon_dashboard.png"
+            plt.title("Macro Risk Radar Dashboard", color='#ffffff', size=12, fontweight='bold', pad=15)
+            plt.savefig(dashboard_path, facecolor=fig.get_facecolor(), bbox_inches='tight', dpi=150)
+            plt.close()
+            return dashboard_path
+        except Exception as e:
+            print(f"데프콘 대시보드 차트 생성 중 오류: {e}")
+            return None
+
     async def job(self):
         print(f"[{datetime.datetime.now(self.kst)}] 시장 지표 확인 및 데프콘 계산 시작...")
         indicators = self.get_market_indicators()
         defcon_level = self.calculate_defcon(indicators)
 
+        # 데프콘 대시보드 시각화 이미지 생성
+        dashboard_path = self.generate_dashboard_chart(indicators, defcon_level)
+
         if self.ai_engine:
             print("AIEngine을 통한 AI 매크로 브리핑(DEFCON) 보고서 생성을 시작합니다...")
             ai_report = await self.ai_engine.get_defcon_report(indicators, defcon_level)
             if ai_report:
+                if dashboard_path:
+                    self.bot.send_photo(dashboard_path, caption=f"*🚨 [종합 DEFCON STATUS: {defcon_level:.1f}] 일일 시장 점검 대시보드*")
+                    await asyncio.sleep(3)
                 self.bot.send_message(ai_report)
                 await asyncio.sleep(3)
                 print("AI 매크로 브리핑 메시지 전송 완료.")
                 return
+
+        if dashboard_path:
+            self.bot.send_photo(dashboard_path, caption=f"*🚨 [종합 DEFCON STATUS: {defcon_level:.1f}] 일일 시장 점검 대시보드*")
+            await asyncio.sleep(3)
 
         message = f"🚨 [일일 시장 점검] 오늘의 DEFCON 레벨: {defcon_level:.1f} 🚨\n"
         message += "(1: 최고 위험 ~ 5: 평화)\n\n"

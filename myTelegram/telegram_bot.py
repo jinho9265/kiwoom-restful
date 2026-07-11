@@ -42,6 +42,45 @@ class TelegramBot:
         # getLogger()는 이미 설정된 로거가 있다면 그 인스턴스를 반환합니다.
         self.logger = logging.getLogger(__name__)
 
+    def send_photo(self, photo_path, caption="", parse_mode="Markdown"):
+        """
+        지정된 채팅 ID로 사진을 보냅니다.
+        :param photo_path: 보낼 사진의 로컬 파일 경로
+        :param caption: 사진 설명 텍스트
+        :param parse_mode: 텍스트 포맷 옵션 (Markdown, HTML 등)
+        """
+        if not self.token:
+            self.logger.warning("텔레그램 봇 토큰이 없어 사진을 보낼 수 없습니다.")
+            return
+
+        async def _send():
+            try:
+                # 쉼표로 구분된 여러 채팅 ID를 리스트로 분리합니다.
+                chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
+                for chat_id in chat_ids:
+                    try:
+                        with open(photo_path, 'rb') as photo:
+                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode=parse_mode)
+                    except Exception as parse_err:
+                        self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
+                        with open(photo_path, 'rb') as photo:
+                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption)
+                self.logger.info(f"텔레그램 사진 발송 성공 (경로: {photo_path})")
+            except Exception as e:
+                self.logger.error(f"텔레그램 사진 발송 실패: {e}")
+
+        try:
+            current_loop = asyncio.get_running_loop()
+        except RuntimeError:
+            current_loop = None
+
+        if current_loop is not None:
+            current_loop.create_task(_send())
+        elif getattr(self, 'loop', None) and self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(_send(), self.loop)
+        else:
+            asyncio.run(_send())
+
     def send_message(self, message, parse_mode="Markdown"):
         """
         지정된 채팅 ID로 메시지를 보냅니다.
@@ -282,6 +321,44 @@ class TelegramBot:
 
                     table_str = df_subset.to_string()
                     technical_str = f"{summary}\n[최근 60영업일 일자별 추세 데이터]\n{table_str}"
+
+                    # 캔들 차트 이미지 생성 및 전송 (최근 1개월 주가 추세)
+                    try:
+                        import mplfinance as mpf
+                        import os
+                        
+                        # 최근 1개월(약 30일치 데이터) 준비
+                        df_chart = df.tail(30).copy()
+                        df_chart.rename(columns={
+                            '시가': 'Open',
+                            '고가': 'High',
+                            '저가': 'Low',
+                            '종가': 'Close',
+                            '거래량': 'Volume'
+                        }, inplace=True)
+                        
+                        os.makedirs("tmp_charts", exist_ok=True)
+                        photo_path = f"tmp_charts/{code}_candle.png"
+                        
+                        # 한국 주식 차트 색상 (상승: 빨강, 하락: 파랑)
+                        mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
+                        s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--', y_on_right=True)
+                        
+                        # 차트 그리기 및 파일 저장
+                        mpf.plot(
+                            df_chart, 
+                            type='candle', 
+                            style=s, 
+                            volume=True, 
+                            savefig=photo_path, 
+                            title=f"\n{market_data['name']} ({code}) 1-Month Trend"
+                        )
+                        
+                        # 텔레그램으로 이미지 발송
+                        self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세*")
+                        await asyncio.sleep(3) # 발송 대기
+                    except Exception as chart_err:
+                        self.logger.error(f"캔들 차트 이미지 생성/전송 중 오류 발생: {chart_err}", exc_info=True)
                 else:
                     self.logger.warning(f"'{stock_name}' 종목의 기술 분석 데이터가 충분하지 않습니다. (가져온 데이터 개수: {len(df) if df is not None else 0})")
             except Exception as e:
