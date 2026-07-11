@@ -12,17 +12,16 @@ class AIEngine:
         self.model_name = myConfig.GEMINI_MODEL_NAME
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
-    async def get_recommendation(self, market_data, asset_data):
+    async def get_recommendation(self, market_data, asset_data, technical_data=None):
         """시장 데이터와 자산 데이터를 바탕으로 AI에게 의견 요청"""
 
         if myConfig.SKIP_REQUEST_GEMINI:
             return None
 
-        # TODO: Prompt 고도화
-        # TODO: 매수/매도 추천 강도, 계좌 상태에 포트폴리오 반영
+        # 시스템 지침 고도화: 단순 당일 등락이 아닌 멀티 타임프레임 기술 지표 추세를 분석하도록 지시
         system_instruction = (
-            "당신은 전문 주식 투자 분석가입니다. 제공된 한국 시장 데이터와 계좌 상태를 분석하여 "
-            "매수, 매도, 또는 관망(Hold) 중 하나를 추천하고, 그 이유를 기술적/기본적 분석 관점에서 설명하세요."
+            "당신은 전문 주식 투자 분석가입니다. 제공된 한국 시장 데이터, 최근 기술 지표 요약 및 60영업일 간의 상세 추세 데이터(이동평균선 5/20/60, RSI, MACD, 볼린저 밴드 등), 그리고 계좌 상태를 종합적으로 분석하십시오. "
+            "단순 당일 등락에만 치우치지 말고 시장 흐름과 최근 추세를 충분히 반영하여 매수, 매도, 또는 관망(Hold) 중 하나를 추천하고, 그 이유를 기술적 분석 관점에서 상세히 설명하십시오."
         )
 
         user_query = f"""
@@ -32,7 +31,12 @@ class AIEngine:
         현재가: {market_data['current_price']}원
         변동률: {market_data['change_rate']}%
         거래량: {market_data['volume']}
+        """
 
+        if technical_data:
+            user_query += f"\n[기술적 분석 지표 (최근 60영업일 추세)]\n{technical_data}\n"
+
+        user_query += f"""
         [계좌 상태]
         현재 가용 예수금: {asset_data['cash']}원
         총 자산: {asset_data['total_asset']}원

@@ -6,6 +6,9 @@ from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, fil
 import myConfig
 import asyncio
 import logging
+import pandas as pd
+from datetime import datetime, timedelta
+
 
 class TelegramBot:
     """
@@ -199,7 +202,92 @@ class TelegramBot:
                 'change_rate': float(stock_info.get('flu_rt', '0')),
                 'volume': int(stock_info.get('trde_qty'))
             }
-            report = await self.ai_engine.get_recommendation(market_data, asset_data)
+
+            # 일봉 캔들 데이터 조회 및 기술적 지표 계산 (최근 180일 데이터를 확보하여 앞부분 지표 손실 보완)
+            start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+            technical_str = ""
+            try:
+                # self.kiwoom_bot.candle은 DataFrame을 반환함
+                df = await self.kiwoom_bot.candle(code, period="day", ctype="stock", start=start_date)
+                if df is not None and len(df) >= 5:
+                    # 5일/20일/60일 이동평균선
+                    df['SMA5'] = df['종가'].rolling(window=5).mean()
+                    if len(df) >= 20:
+                        df['SMA20'] = df['종가'].rolling(window=20).mean()
+                    if len(df) >= 60:
+                        df['SMA60'] = df['종가'].rolling(window=60).mean()
+
+                    # 볼린저 밴드 (20일, 표준편차 2배)
+                    if len(df) >= 20:
+                        std20 = df['종가'].rolling(window=20).std()
+                        df['BB_Mid'] = df['SMA20']
+                        df['BB_Upper'] = df['BB_Mid'] + (std20 * 2)
+                        df['BB_Lower'] = df['BB_Mid'] - (std20 * 2)
+
+                    # MACD (12, 26, 9)
+                    if len(df) >= 26:
+                        ema12 = df['종가'].ewm(span=12, adjust=False).mean()
+                        ema26 = df['종가'].ewm(span=26, adjust=False).mean()
+                        df['MACD'] = ema12 - ema26
+                        df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+                        df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+
+                    # RSI (14)
+                    if len(df) >= 14:
+                        delta = df['종가'].diff()
+                        gain = delta.clip(lower=0)
+                        loss = -delta.clip(upper=0)
+                        avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+                        avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+                        rs = avg_gain / avg_loss.replace(0, 1e-9)
+                        df['RSI'] = 100 - (100 / (1 + rs))
+
+                    # 현재 기준 기술 지표 수치 요약
+                    close = df['종가'].iloc[-1]
+                    sma5_val = df['SMA5'].iloc[-1] if 'SMA5' in df and pd.notna(df['SMA5'].iloc[-1]) else float('nan')
+                    sma20_val = df['SMA20'].iloc[-1] if 'SMA20' in df and pd.notna(df['SMA20'].iloc[-1]) else float('nan')
+                    sma60_val = df['SMA60'].iloc[-1] if 'SMA60' in df and pd.notna(df['SMA60'].iloc[-1]) else float('nan')
+
+                    disparity_5 = (close / sma5_val) * 100 if pd.notna(sma5_val) else float('nan')
+                    disparity_20 = (close / sma20_val) * 100 if pd.notna(sma20_val) else float('nan')
+                    disparity_60 = (close / sma60_val) * 100 if pd.notna(sma60_val) else float('nan')
+
+                    bb_upper = df['BB_Upper'].iloc[-1] if 'BB_Upper' in df and pd.notna(df['BB_Upper'].iloc[-1]) else float('nan')
+                    bb_lower = df['BB_Lower'].iloc[-1] if 'BB_Lower' in df and pd.notna(df['BB_Lower'].iloc[-1]) else float('nan')
+                    bb_percent = ((close - bb_lower) / (bb_upper - bb_lower)) * 100 if pd.notna(bb_upper) and pd.notna(bb_lower) and (bb_upper - bb_lower) != 0 else float('nan')
+
+                    rsi_val = df['RSI'].iloc[-1] if 'RSI' in df and pd.notna(df['RSI'].iloc[-1]) else float('nan')
+                    macd_val = df['MACD'].iloc[-1] if 'MACD' in df and pd.notna(df['MACD'].iloc[-1]) else float('nan')
+                    macd_sig = df['MACD_Signal'].iloc[-1] if 'MACD_Signal' in df and pd.notna(df['MACD_Signal'].iloc[-1]) else float('nan')
+                    macd_hist = df['MACD_Hist'].iloc[-1] if 'MACD_Hist' in df and pd.notna(df['MACD_Hist'].iloc[-1]) else float('nan')
+
+                    def format_num(val, fmt="{:,.1f}"):
+                        import math
+                        return "N/A" if pd.isna(val) or math.isnan(val) else fmt.format(val)
+
+                    summary = (
+                        f"[최근 기술적 지표 요약]\n"
+                        f"- 종가: {close:,.0f}원\n"
+                        f"- 이동평균선(SMA): 5일선 {format_num(sma5_val)}원 | 20일선 {format_num(sma20_val)}원 | 60일선 {format_num(sma60_val)}원\n"
+                        f"- 이격도(Disparity): 5일선 {format_num(disparity_5, '{:.2f}%')} | 20일선 {format_num(disparity_20, '{:.2f}%')} | 60일선 {format_num(disparity_60, '{:.2f}%')}\n"
+                        f"- 볼린저 밴드: 하한선 {format_num(bb_lower)}원 | 상한선 {format_num(bb_upper)}원 (현재가 위치 %B: {format_num(bb_percent, '{:.2f}%')})\n"
+                        f"- RSI(14): {format_num(rsi_val, '{:.2f}')} (30이하 과매도, 70이상 과매수)\n"
+                        f"- MACD: {format_num(macd_val, '{:.2f}')} | Signal: {format_num(macd_sig, '{:.2f}')} | Hist: {format_num(macd_hist, '{:.2f}')}\n"
+                    )
+
+                    # 최근 60영업일 데이터 필터링
+                    df_recent = df.tail(60)
+                    cols_to_show = [c for c in ['종가', 'SMA5', 'SMA20', 'SMA60', 'RSI', 'MACD', 'BB_Lower', 'BB_Upper'] if c in df]
+                    df_subset = df_recent[cols_to_show].round(1)
+
+                    table_str = df_subset.to_string()
+                    technical_str = f"{summary}\n[최근 60영업일 일자별 추세 데이터]\n{table_str}"
+                else:
+                    self.logger.warning(f"'{stock_name}' 종목의 기술 분석 데이터가 충분하지 않습니다. (가져온 데이터 개수: {len(df) if df is not None else 0})")
+            except Exception as e:
+                self.logger.error(f"Candle 데이터 조회/지표 계산 중 오류 발생: {e}", exc_info=True)
+
+            report = await self.ai_engine.get_recommendation(market_data, asset_data, technical_data=technical_str)
             if report:
                 self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
                 self.send_message(f"[{market_data['name']}] AI 의견:\n{report}")
