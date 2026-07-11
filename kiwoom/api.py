@@ -2,6 +2,7 @@ import asyncio
 import contextlib
 from collections import defaultdict
 from datetime import datetime, timedelta
+import logging
 from inspect import iscoroutinefunction
 from typing import Callable, Optional
 
@@ -35,6 +36,8 @@ from kiwoom.http.utils import (
     wrap_async_callback,
     wrap_sync_callback,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class API(Client):
@@ -79,8 +82,8 @@ class API(Client):
         self._stop_event.set()
 
         self._sem = asyncio.Semaphore(config.http.WEBSOCKET_MAX_CONCURRENCY)
-        async_print = wrap_sync_callback(self._sem, lambda msg: print(msg))
-        self._callbacks = defaultdict(lambda: async_print)
+        async_log = wrap_sync_callback(self._sem, lambda msg: logger.info(f"Default callback: {msg}"))
+        self._callbacks = defaultdict(lambda: async_log)
         self._add_default_callback_on_real_data()
 
     async def connect(self, headers: Optional[dict] = None):
@@ -352,7 +355,7 @@ class API(Client):
         def callback_on_login(msg: dict):
             if msg.get("return_code") != 0:
                 raise RuntimeError(f"Login failed with return_code not zero, {msg}.")
-            print("키움 REST API Login 성공!")
+            logger.info("키움 REST API Login 성공!")
 
         self.add_callback_on_real_data(real_type="LOGIN", callback=callback_on_login)
 
@@ -399,7 +402,7 @@ class API(Client):
 
             except Exception as err:
                 # 백그라운드 수신 루프가 종료되지 않도록 예외는 로깅만 수행
-                print(f"Failed to handling websocket data: {err}")
+                logger.error(f"Failed to handling websocket data: {err}", exc_info=True)
 
             finally:
                 self.queue.task_done()
@@ -528,6 +531,6 @@ class API(Client):
         res = await self.request(endpoint, api_id, data={"stk_cd": stock_code})
         body = res.json()
         if body["return_code"] != 0:
-            print(f"invalid return_code: {body['return_code']}")
+            logger.warning(f"get_stock_info failed with invalid return_code: {body['return_code']} for stock_code: {stock_code}")
             return None
         return body

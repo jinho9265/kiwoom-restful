@@ -5,6 +5,7 @@ from telegram import ReplyKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
 import myConfig
 import asyncio
+import logging
 
 class TelegramBot:
     """
@@ -14,8 +15,9 @@ class TelegramBot:
         """
         봇 인스턴스를 초기화합니다.
         """
+        self._setup_logging()
         if not myConfig.TELEGRAM_BOT_TOKEN:
-            print("텔레그램 봇 토큰이 설정되지 않았습니다.")
+            self.logger.warning("텔레그램 봇 토큰이 설정되지 않았습니다.")
             self.token = None
             self.app = None
             self.loop = None
@@ -27,10 +29,15 @@ class TelegramBot:
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
             self.loop = None
-        print("텔레그램 봇 준비 완료.")
+        self.logger.info("텔레그램 봇 준비 완료.")
 
         self.waiting_for_ask = set()
         self.kiwoom_codes = None
+
+    def _setup_logging(self):
+        """로깅 설정을 초기화합니다."""
+        # getLogger()는 이미 설정된 로거가 있다면 그 인스턴스를 반환합니다.
+        self.logger = logging.getLogger(__name__)
 
     def send_message(self, message):
         """
@@ -38,7 +45,7 @@ class TelegramBot:
         :param message: 보낼 메시지 문자열
         """
         if not self.token:
-            print("텔레그램 봇 토큰이 없어 메시지를 보낼 수 없습니다.")
+            self.logger.warning("텔레그램 봇 토큰이 없어 메시지를 보낼 수 없습니다.")
             return
 
         async def _send():
@@ -47,13 +54,13 @@ class TelegramBot:
                 chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
                 for chat_id in chat_ids:
                     await self.app.bot.send_message(chat_id=chat_id, text=message)
-                print(f"텔레그램 메시지 발송 성공: {message}")
+                self.logger.info(f"텔레그램 메시지 발송 성공: {message}")
             except Exception as e:
-                print(f"텔레그램 메시지 발송 실패: {e}")
-                print("==================================================")
-                print("      .env 파일의 토큰(TOKEN)과 채팅 ID(CHAT_ID)가      ")
-                print("         올바르게 입력되었는지 다시 확인해주세요.         ")
-                print("==================================================")
+                self.logger.error(f"텔레그램 메시지 발송 실패: {e}")
+                self.logger.error("==================================================")
+                self.logger.error("      .env 파일의 토큰(TOKEN)과 채팅 ID(CHAT_ID)가      ")
+                self.logger.error("         올바르게 입력되었는지 다시 확인해주세요.         ")
+                self.logger.error("==================================================")
 
         try:
             current_loop = asyncio.get_running_loop()
@@ -102,7 +109,7 @@ class TelegramBot:
             await self.app.initialize()
             await self.app.start()
             await self.app.updater.start_polling()
-            print("텔레그램 명령어 수신 대기(Polling) 시작...")
+            self.logger.info("텔레그램 명령어 수신 대기(Polling) 시작...")
 
     async def setup_handlers(self, kiwoom_bot, ai_engine, market_monitor):
         """
@@ -188,18 +195,18 @@ class TelegramBot:
             }
             report = await asyncio.to_thread(self.ai_engine.get_recommendation, market_data, asset_data)
             if report:
-                print(f"[{market_data['name']}] AI 분석 결과:\n{report}")
+                self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
                 self.send_message(f"[{market_data['name']}] AI 의견:\n{report}")
                 await asyncio.sleep(5)
         else:
             await update.message.reply_text(f"'{stock_name}' 종목을 찾을 수 없습니다.")
 
 if __name__ == '__main__':
-    print("텔레그램 봇 테스트를 시작합니다.")
     bot = TelegramBot()
+    bot.logger.info("텔레그램 봇 테스트를 시작합니다.")
     if bot.token:
         bot.send_message("이 메시지가 보인다면 텔레그램 봇 설정이 완료된 것입니다.")
         import time
         time.sleep(1)
     else:
-        print("텔레그램 봇 토큰이 없어 테스트를 진행할 수 없습니다.")
+        bot.logger.warning("텔레그램 봇 토큰이 없어 테스트를 진행할 수 없습니다.")

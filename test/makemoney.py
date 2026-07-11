@@ -2,6 +2,7 @@
 
 import asyncio
 import myConfig
+import logging
 import functools
 
 from datetime import datetime
@@ -10,14 +11,16 @@ from myMarketMonitor import MarketMonitor
 from myTelegram import TelegramBot
 from myAIEngine import AIEngine
 
+logger = logging.getLogger(__name__)
+
 # CNSRLST
 async def on_receive_conditional_search_list(msg: dict):
     """
     'CNSRLST' 요청에 대한 응답 콜백입니다.
     수신된 조건검색 목록을 출력합니다.
     """
-    for seq, name in msg.get('data', []):
-        print(f"일련번호: {seq}, 이름: {name}")
+    for seq, name in msg.get('data', []): # type: ignore
+        logger.info(f"조건검색식 수신 - 일련번호: {seq}, 이름: {name}")
 
 async def handle_search_request(msg: dict, ai_engine, telegram_bot):
     """
@@ -25,7 +28,7 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
     요청한 검색 조건에 부합하는 종목을 파악하고 AI 엔진에 분석을 요청합니다.
     """
     if msg.get('return_code') != 0:
-        print(f"조건검색 오류: {msg.get('return_msg')}")
+        logger.error(f"조건검색 오류: {msg.get('return_msg')}")
         return
 
     market_data_list = []
@@ -54,7 +57,7 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
             if not report:
                 continue
 
-            print(f"[{market_data['name']}] AI 분석 결과:\n{report}")
+            logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
             telegram_bot.send_message(f"[{market_data['name']}] AI 의견:\n{report}")
 
             # 무료 API 요청 한도(15 RPM)를 초과하지 않도록 종목당 5초씩 대기합니다.
@@ -62,6 +65,13 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
 
 
 async def main():
+    # 로깅 설정
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[logging.FileHandler('makemoney.log', encoding='utf-8'), logging.StreamHandler()]
+    )
+
     telegram_bot = TelegramBot()
     ai_engine = AIEngine()
     market_monitor = MarketMonitor(telegram_bot)
@@ -90,7 +100,7 @@ async def main():
 
         while True:
             if myConfig.ENABLE_CONDITION_SEARCH:
-                print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 조건검색을 요청합니다.")
+                logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 조건검색을 요청합니다.")
                 # ⚠️ 주의: '0' 대신 앞서 출력된 실제 일련번호(seq)를 입력해야 합니다. (예: '1', '2' 등)
                 await bot.api.conditional_search_request('0', '0')
 
