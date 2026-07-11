@@ -1,7 +1,7 @@
 # ai_engine.py
 
-import time
-import requests
+import asyncio
+import aiohttp
 import myConfig
 
 class AIEngine:
@@ -12,7 +12,7 @@ class AIEngine:
         self.model_name = myConfig.GEMINI_MODEL_NAME
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
-    def get_recommendation(self, market_data, asset_data):
+    async def get_recommendation(self, market_data, asset_data):
         """시장 데이터와 자산 데이터를 바탕으로 AI에게 의견 요청"""
 
         if myConfig.SKIP_REQUEST_GEMINI:
@@ -51,24 +51,25 @@ class AIEngine:
 
         for i in range(6):
             try:
-                response = requests.post(self.api_url, json=payload, timeout=30)
-                response.raise_for_status()
-                result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "분석 결과 생성 실패")
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 429:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(self.api_url, json=payload, timeout=30) as response:
+                        response.raise_for_status()
+                        result = await response.json()
+                        return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "분석 결과 생성 실패")
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429:
                     print(f"API 요청 한도 초과(429). {15 * (i + 1)}초 대기 후 재시도합니다...")
-                    time.sleep(15 * (i + 1))
+                    await asyncio.sleep(15 * (i + 1))
                     continue
                 if i == 5:
                     return f"AI 연결 실패: {str(e)}"
-                time.sleep(2 ** i)
+                await asyncio.sleep(2 ** i)
             except Exception as e:
                 if i == 5:
                     return f"AI 연결 실패: {str(e)}"
-                time.sleep(2 ** i)
+                await asyncio.sleep(2 ** i)
 
-    def get_defcon_report(self, indicators, defcon_level):
+    async def get_defcon_report(self, indicators, defcon_level):
         """글로벌 매크로 지표와 데프콘 레벨을 바탕으로 전술 브리핑을 생성합니다."""
         if myConfig.SKIP_REQUEST_GEMINI:
             return None
@@ -155,19 +156,20 @@ class AIEngine:
 
         for i in range(6):
             try:
-                response = requests.post(self.api_url, json=payload, timeout=30)
-                response.raise_for_status()
-                result = response.json()
-                return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "브리핑 생성 실패")
-            except requests.exceptions.HTTPError as e:
-                if e.response is not None and e.response.status_code == 429:
+                async with aiohttp.ClientSession() as session:
+                    async with session.post(self.api_url, json=payload, timeout=30) as response:
+                        response.raise_for_status()
+                        result = await response.json()
+                        return result.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', "브리핑 생성 실패")
+            except aiohttp.ClientResponseError as e:
+                if e.status == 429:
                     print(f"API 요청 한도 초과(429). {15 * (i + 1)}초 대기 후 재시도합니다...")
-                    time.sleep(15 * (i + 1))
+                    await asyncio.sleep(15 * (i + 1))
                     continue
                 if i == 5:
                     return f"AI 연결 실패: {str(e)}"
-                time.sleep(2 ** i)
+                await asyncio.sleep(2 ** i)
             except Exception as e:
                 if i == 5:
                     return f"AI 연결 실패: {str(e)}"
-                time.sleep(2 ** i)
+                await asyncio.sleep(2 ** i)

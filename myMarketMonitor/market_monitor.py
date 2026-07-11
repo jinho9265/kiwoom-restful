@@ -1,5 +1,6 @@
 # market_monitor.py
 
+import asyncio
 import datetime
 import requests
 import time
@@ -330,14 +331,14 @@ class MarketMonitor:
         defcon = max(1.0, min(5.0, defcon))
         return round(defcon, 1)
 
-    def job(self):
+    async def job(self):
         print(f"[{datetime.datetime.now(self.kst)}] 시장 지표 확인 및 데프콘 계산 시작...")
         indicators = self.get_market_indicators()
         defcon_level = self.calculate_defcon(indicators)
 
         if self.ai_engine:
             print("AIEngine을 통한 AI 매크로 브리핑(DEFCON) 보고서 생성을 시작합니다...")
-            ai_report = self.ai_engine.get_defcon_report(indicators, defcon_level)
+            ai_report = await self.ai_engine.get_defcon_report(indicators, defcon_level)
             if ai_report:
                 self.bot.send_message(ai_report)
                 print("AI 매크로 브리핑 메시지 전송 완료.")
@@ -368,7 +369,8 @@ class MarketMonitor:
 
             if now_kst.minute == 0 and last_run_hour != now_kst.hour and not (0 <= now_kst.hour <= 6):
             #if last_run_minute != now_kst.minute:
-                self.job()
+                # Call async job synchronously using asyncio.run
+                asyncio.run(self.job())
                 last_run_hour = now_kst.hour
                 last_run_minute = now_kst.minute
 
@@ -387,5 +389,5 @@ if __name__ == "__main__":
         print(f"AIEngine 로드 실패(기본 텍스트 리포트 사용): {e}")
         ai = None
     marketMonitor = MarketMonitor(TelegramBot(), ai)
-    marketMonitor.job()
+    asyncio.run(marketMonitor.job())
 

@@ -173,7 +173,7 @@ class TelegramBot:
     async def defcon_command(self, update, context):
         self.waiting_for_ask.discard(update.effective_user.id)
         await update.message.reply_text("시장 지표 확인 및 데프콘 계산을 시작합니다. 잠시만 기다려주세요...")
-        await asyncio.to_thread(self.market_monitor.job)
+        await self.market_monitor.job()
 
     async def analyze_stock(self, update, stock_name):
         await update.message.reply_text(f"'{stock_name}' 종목을 키움 API로 분석합니다. 잠시만 기다려주세요...")
@@ -199,7 +199,7 @@ class TelegramBot:
                 'change_rate': float(stock_info.get('flu_rt', '0')),
                 'volume': int(stock_info.get('trde_qty'))
             }
-            report = await asyncio.to_thread(self.ai_engine.get_recommendation, market_data, asset_data)
+            report = await self.ai_engine.get_recommendation(market_data, asset_data)
             if report:
                 self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
                 self.send_message(f"[{market_data['name']}] AI 의견:\n{report}")

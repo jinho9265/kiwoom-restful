@@ -51,9 +51,8 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
 
         # TODO: Query할 종목 개수 선정
         for market_data in market_data_list[:3]:
-            # 주의: get_recommendation 내부에서 requests.post(동기)를 사용하므로
-            # 이벤트 루프 차단을 막기 위해 백그라운드 스레드에서 실행 (asyncio.to_thread)
-            report = await asyncio.to_thread(ai_engine.get_recommendation, market_data, asset_data)
+            # get_recommendation은 비동기 함수이므로 직접 await 호출합니다.
+            report = await ai_engine.get_recommendation(market_data, asset_data)
             if not report:
                 continue
 
