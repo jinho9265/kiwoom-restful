@@ -12,16 +12,21 @@ class AIEngine:
         self.model_name = myConfig.GEMINI_MODEL_NAME
         self.api_url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={self.api_key}"
 
-    async def get_recommendation(self, market_data, asset_data, technical_data=None):
+    async def get_recommendation(self, market_data, asset_data, technical_data=None, news_data=None):
         """시장 데이터와 자산 데이터를 바탕으로 AI에게 의견 요청"""
 
         if myConfig.SKIP_REQUEST_GEMINI:
             return None
 
-        # 시스템 지침 고도화: 단순 당일 등락이 아닌 멀티 타임프레임 기술 지표 추세를 분석하도록 지시 (텔레그램 마크다운 규격 준수)
+        # 시스템 지침 고도화: 단순 당일 등락이 아닌 멀티 타임프레임 기술 지표 추세 및 뉴스 감성을 분석하도록 지시 (텔레그램 마크다운 규격 준수)
         system_instruction = (
-            "당신은 전문 주식 투자 분석가입니다. 제공된 한국 시장 데이터, 최근 기술 지표 요약 및 60영업일 간의 상세 추세 데이터(이동평균선 5/20/60, RSI, MACD, 볼린저 밴드 등), 그리고 계좌 상태를 종합적으로 분석하십시오.\n"
+            "당신은 전문 주식 투자 분석가입니다. 제공된 한국 시장 데이터, 최근 기술 지표 요약 및 60영업일 간의 상세 추세 데이터(이동평균선 5/20/60, RSI, MACD, 볼린저 밴드 등), 최근 뉴스 헤드라인 데이터, 그리고 계좌 상태를 종합적으로 분석하십시오.\n"
             "단순 당일 등락에만 치우치지 말고 시장 흐름과 최근 추세를 충분히 반영하여 매수, 매도, 또는 관망(Hold) 중 하나를 추천하고, 그 이유를 기술적 분석 관점에서 상세히 설명하십시오.\n\n"
+            "특히 [최근 뉴스 헤드라인 데이터]가 제공되는 경우, 뉴스의 시장 긍정/부정적 영향을 분석하여 **종합 감성 점수 (Sentiment Score, -100에서 +100 사이)**를 산출하십시오.\n"
+            "- -100은 극도로 비관적(Bearish)\n"
+            "- +100은 극도로 낙관적(Bullish)\n"
+            "- 0은 완전 중립(Neutral)\n"
+            "보고서 최상단에 산출된 감성 점수와 핵심 감성 요약 한 줄을 기재하고 시작하십시오.\n\n"
             "★ [텔레그램 마크다운 호환성 핵심 규칙 (절대 준수)] ★\n"
             "1. *해시태그(#, ##, ###) 절대 사용 금지*: 텔레그램 Legacy Markdown은 `#` 기호를 지원하지 않으므로 raw 텍스트로 보입니다. "
             "절대 `###` 같은 기호를 제목에 쓰지 마십시오. 대신 모든 제목은 별표 1개씩으로 감싸 볼드체로 강조하십시오. (예: `*🚨 [삼성전자 기술적 분석 보고서]*`)\n"
@@ -47,6 +52,9 @@ class AIEngine:
 
         if technical_data:
             user_query += f"\n[기술적 분석 지표 (최근 60영업일 추세)]\n{technical_data}\n"
+
+        if news_data:
+            user_query += f"\n[최근 뉴스 헤드라인 데이터]\n{news_data}\n"
 
         user_query += f"""
         [계좌 상태]

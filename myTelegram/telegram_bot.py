@@ -362,7 +362,16 @@ class TelegramBot:
             except Exception as e:
                 self.logger.error(f"Candle 데이터 조회/지표 계산 중 오류 발생: {e}", exc_info=True)
 
-            report = await self.ai_engine.get_recommendation(market_data, asset_data, technical_data=technical_str)
+            # 뉴스 데이터 비동기 수집 (네이버 API 대안 구글 뉴스 RSS 활용)
+            news_str = ""
+            try:
+                news_titles = await self.fetch_google_news(market_data['name'])
+                if news_titles:
+                    news_str = "\n".join(f"- {title}" for title in news_titles)
+            except Exception as news_err:
+                self.logger.error(f"뉴스 수집 오류: {news_err}")
+
+            report = await self.ai_engine.get_recommendation(market_data, asset_data, technical_data=technical_str, news_data=news_str)
             if report:
                 self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
                 # AI 답변이 준비되었을 때, 캔들 차트와 설명 텍스트를 연달아 전송
@@ -373,6 +382,40 @@ class TelegramBot:
                 await asyncio.sleep(5)
         else:
             await update.message.reply_text(f"'{stock_name}' 종목을 찾을 수 없습니다.")
+
+    async def fetch_google_news(self, stock_name: str) -> list[str]:
+        """구글 뉴스 RSS를 통해 해당 종목 관련 최신 뉴스 헤드라인 5개를 비동기로 수집합니다."""
+        import urllib.parse
+        import xml.etree.ElementTree as ET
+        import aiohttp
+        
+        query = urllib.parse.quote(stock_name)
+        url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
+        
+        headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        try:
+            connector = aiohttp.TCPConnector(resolver=aiohttp.ThreadedResolver())
+            async with aiohttp.ClientSession(connector=connector) as session:
+                async with session.get(url, headers=headers, timeout=5) as response:
+                    if response.status == 200:
+                        xml_data = await response.text()
+                        root = ET.fromstring(xml_data)
+                        titles = []
+                        seen_titles = set()
+                        for item in root.findall(".//item"):
+                            title = item.find("title").text
+                            if " - " in title:
+                                title = title.rsplit(" - ", 1)[0]
+                            title_stripped = title.strip()
+                            if title_stripped not in seen_titles:
+                                seen_titles.add(title_stripped)
+                                titles.append(title_stripped)
+                            if len(titles) >= 5:
+                                break
+                        return titles
+        except Exception as e:
+            self.logger.error(f"구글 뉴스 RSS 수집 실패 ({stock_name}): {e}")
+        return []
 
 if __name__ == '__main__':
     bot = TelegramBot()
