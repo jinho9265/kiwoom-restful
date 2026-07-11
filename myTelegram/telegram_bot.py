@@ -171,6 +171,13 @@ class TelegramBot:
         self.add_command_handler("defcon", self.defcon_command)
         self.add_message_handler(self.handle_text_message)
 
+        # 실시간 조건검색 웹소켓 콜백 등록
+        if self.kiwoom_bot.api:
+            self.kiwoom_bot.api.add_callback_on_real_data("CNSRLST", self.on_receive_cnsr_list)
+            self.kiwoom_bot.api.add_callback_on_real_data("CNSRREQ", self.on_receive_cnsr_request)
+            # 로그인 완료 대기 후 조건검색 가동
+            asyncio.create_task(self.init_conditional_search())
+
         # 텔레그램 기본 '메뉴' 버튼에 등록
         await self.set_menu_commands([
             ("start", "시작 및 키보드 버튼 표시"),
@@ -373,6 +380,179 @@ class TelegramBot:
                 await asyncio.sleep(5)
         else:
             await update.message.reply_text(f"'{stock_name}' 종목을 찾을 수 없습니다.")
+
+    async def init_conditional_search(self):
+        """로그인 후 5초 뒤에 조건검색식 목록을 요청합니다."""
+        await asyncio.sleep(5)
+        try:
+            self.logger.info("키움 REST API 조건검색식 목록 조회 요청...")
+            await self.kiwoom_bot.api.conditional_search_list()
+        except Exception as e:
+            self.logger.error(f"조건검색 목록 요청 실패: {e}")
+
+    async def on_receive_cnsr_list(self, msg: dict):
+        """조건검색식 목록을 수신하여 첫 번째 조건식을 실시간 감시 대상으로 등록합니다."""
+        self.logger.info(f"조건검색식 목록 수신: {msg}")
+        data = msg.get("data", [])
+        if not data:
+            self.logger.warning("등록된 조건검색식이 존재하지 않습니다.")
+            return
+        
+        target_cnsr = data[0]
+        seq = target_cnsr.get("seq")
+        name = target_cnsr.get("name")
+        self.logger.info(f"실시간 조건검색 등록 시도: [{seq}] {name}")
+        
+        try:
+            # 1: 조건검색 + 실시간조건검색 등록
+            await self.kiwoom_bot.api.conditional_search_request(seq, "1")
+            self.send_message(f"🔍 *[실시간 조건검색 감시 가동]*\n- *조건식*: `{name}` (일련번호: {seq}) 감시를 시작합니다.")
+        except Exception as e:
+            self.logger.error(f"실시간 조건검색 등록 요청 실패: {e}")
+
+    async def on_receive_cnsr_request(self, msg: dict):
+        """실시간 조건 포착 이벤트 수신 시 자동으로 AI 차트 분석을 기동합니다."""
+        self.logger.info(f"실시간 조건 포착 메시지 수신: {msg}")
+        body = msg.get("body", {})
+        data_list = body.get("data", [])
+        if not data_list:
+            return
+        
+        for item in data_list:
+            code = item.get("stk_cd")
+            cnsr_tp = item.get("cnsr_tp", "I") # I: 포착, O: 이탈
+            
+            if cnsr_tp == "I" and code:
+                self.logger.info(f"실시간 조건 포착: 종목코드 {code}")
+                self.send_message(f"🔥 *[조건식 종목 포착]*\n- 종목코드: `{code}`가 실시간 조건에 포착되었습니다. 자동 차트 분석을 시작합니다.")
+                asyncio.create_task(self.analyze_stock_by_code(code))
+
+    async def analyze_stock_by_code(self, code):
+        """실시간 조건 포착 시 종목 코드를 기반으로 자동 차트 생성 및 AI 분석을 수행합니다."""
+        import os
+        if not self.kiwoom_codes:
+            kospi_codes = await self.kiwoom_bot.api.stock_list("0")   # KOSPI
+            kosdaq_codes = await self.kiwoom_bot.api.stock_list("10") # KOSDAQ
+            self.kiwoom_codes = {'list': kospi_codes.get('list', []) + kosdaq_codes.get('list', [])}
+
+        stock_item = next((item for item in self.kiwoom_codes.get('list', []) if item.get('code') == code), None)
+        stock_name = stock_item.get('name') if stock_item else code
+
+        try:
+            stock_info = await self.kiwoom_bot.api.get_stock_info(code)
+            market_data = {
+                'name': stock_info.get('stk_nm', stock_name),
+                'ticker': stock_info.get('stk_cd', code),
+                'current_price': abs(int(stock_info.get('cur_prc', 0))),
+                'change_rate': float(stock_info.get('flu_rt', '0')),
+                'volume': int(stock_info.get('trde_qty', 0))
+            }
+        except Exception as e:
+            self.logger.error(f"자동 분석 종목 정보 조회 실패 ({code}): {e}")
+            return
+
+        start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
+        technical_str = ""
+        photo_path = None
+        try:
+            df = await self.kiwoom_bot.candle(code, period="day", ctype="stock", start=start_date)
+            if df is not None and len(df) >= 5:
+                df['SMA5'] = df['종가'].rolling(window=5).mean()
+                if len(df) >= 20:
+                    df['SMA20'] = df['종가'].rolling(window=20).mean()
+                if len(df) >= 60:
+                    df['SMA60'] = df['종가'].rolling(window=60).mean()
+
+                if len(df) >= 20:
+                    std20 = df['종가'].rolling(window=20).std()
+                    df['BB_Mid'] = df['SMA20']
+                    df['BB_Upper'] = df['BB_Mid'] + (std20 * 2)
+                    df['BB_Lower'] = df['BB_Mid'] - (std20 * 2)
+
+                if len(df) >= 26:
+                    ema12 = df['종가'].ewm(span=12, adjust=False).mean()
+                    ema26 = df['종가'].ewm(span=26, adjust=False).mean()
+                    df['MACD'] = ema12 - ema26
+                    df['MACD_Signal'] = df['MACD'].ewm(span=9, adjust=False).mean()
+                    df['MACD_Hist'] = df['MACD'] - df['MACD_Signal']
+
+                if len(df) >= 14:
+                    delta = df['종가'].diff()
+                    gain = delta.clip(lower=0)
+                    loss = -delta.clip(upper=0)
+                    avg_gain = gain.ewm(alpha=1/14, adjust=False).mean()
+                    avg_loss = loss.ewm(alpha=1/14, adjust=False).mean()
+                    rs = avg_gain / avg_loss.replace(0, 1e-9)
+                    df['RSI'] = 100 - (100 / (1 + rs))
+
+                close = df['종가'].iloc[-1]
+                sma5_val = df['SMA5'].iloc[-1] if 'SMA5' in df and pd.notna(df['SMA5'].iloc[-1]) else float('nan')
+                sma20_val = df['SMA20'].iloc[-1] if 'SMA20' in df and pd.notna(df['SMA20'].iloc[-1]) else float('nan')
+                sma60_val = df['SMA60'].iloc[-1] if 'SMA60' in df and pd.notna(df['SMA60'].iloc[-1]) else float('nan')
+
+                disparity_5 = (close / sma5_val) * 100 if pd.notna(sma5_val) else float('nan')
+                disparity_20 = (close / sma20_val) * 100 if pd.notna(sma20_val) else float('nan')
+                disparity_60 = (close / sma60_val) * 100 if pd.notna(sma60_val) else float('nan')
+
+                bb_upper = df['BB_Upper'].iloc[-1] if 'BB_Upper' in df and pd.notna(df['BB_Upper'].iloc[-1]) else float('nan')
+                bb_lower = df['BB_Lower'].iloc[-1] if 'BB_Lower' in df and pd.notna(df['BB_Lower'].iloc[-1]) else float('nan')
+                bb_percent = ((close - bb_lower) / (bb_upper - bb_lower)) * 100 if pd.notna(bb_upper) and pd.notna(bb_lower) and (bb_upper - bb_lower) != 0 else float('nan')
+
+                rsi_val = df['RSI'].iloc[-1] if 'RSI' in df and pd.notna(df['RSI'].iloc[-1]) else float('nan')
+                macd_val = df['MACD'].iloc[-1] if 'MACD' in df and pd.notna(df['MACD'].iloc[-1]) else float('nan')
+                macd_sig = df['MACD_Signal'].iloc[-1] if 'MACD_Signal' in df and pd.notna(df['MACD_Signal'].iloc[-1]) else float('nan')
+                macd_hist = df['MACD_Hist'].iloc[-1] if 'MACD_Hist' in df and pd.notna(df['MACD_Hist'].iloc[-1]) else float('nan')
+
+                def format_num(val, fmt="{:,.1f}"):
+                    import math
+                    return "N/A" if pd.isna(val) or math.isnan(val) else fmt.format(val)
+
+                summary = (
+                    f"[최근 기술적 지표 요약]\n"
+                    f"- 종가: {close:,.0f}원\n"
+                    f"- 이동평균선(SMA): 5일선 {format_num(sma5_val)}원 | 20일선 {format_num(sma20_val)}원 | 60일선 {format_num(sma60_val)}원\n"
+                    f"- 이격도(Disparity): 5일선 {format_num(disparity_5, '{:.2f}%')} | 20일선 {format_num(disparity_20, '{:.2f}%')} | 60일선 {format_num(disparity_60, '{:.2f}%')}\n"
+                    f"- 볼린저 밴드: 하한선 {format_num(bb_lower)}원 | 상한선 {format_num(bb_upper)}원 (현재가 위치 %B: {format_num(bb_percent, '{:.2f}%')})\n"
+                    f"- RSI(14): {format_num(rsi_val, '{:.2f}')} (30이하 과매도, 70이상 과매수)\n"
+                    f"- MACD: {format_num(macd_val, '{:.2f}')} | Signal: {format_num(macd_sig, '{:.2f}')} | Hist: {format_num(macd_hist, '{:.2f}')}\n"
+                )
+
+                df_recent = df.tail(60)
+                cols_to_show = [c for c in ['종가', 'SMA5', 'SMA20', 'SMA60', 'RSI', 'MACD', 'BB_Lower', 'BB_Upper'] if c in df]
+                df_subset = df_recent[cols_to_show].round(1)
+
+                table_str = df_subset.to_string()
+                technical_str = f"{summary}\n[최근 60영업일 일자별 추세 데이터]\n{table_str}"
+
+                try:
+                    import mplfinance as mpf
+                    df_chart = df.tail(30).copy()
+                    df_chart.rename(columns={
+                        '시가': 'Open',
+                        '고가': 'High',
+                        '저가': 'Low',
+                        '종가': 'Close',
+                        '거래량': 'Volume'
+                    }, inplace=True)
+                    os.makedirs("tmp_charts", exist_ok=True)
+                    photo_path = f"tmp_charts/{code}_candle.png"
+                    mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
+                    s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--', y_on_right=True)
+                    mpf.plot(df_chart, type='candle', style=s, volume=True, savefig=photo_path, title=f"\n{market_data['name']} ({code}) 1-Month Trend")
+                except Exception as chart_err:
+                    self.logger.error(f"자동 분석 캔들 차트 이미지 생성 중 오류: {chart_err}", exc_info=True)
+                    photo_path = None
+        except Exception as e:
+            self.logger.error(f"자동 분석 Candle 조회 중 오류: {e}", exc_info=True)
+
+        asset_data = {'cash': 10000000, 'total_asset': 10000000}
+        report = await self.ai_engine.get_recommendation(market_data, asset_data, technical_data=technical_str)
+        if report:
+            self.logger.info(f"[{market_data['name']}] 자동 AI 분석 완료")
+            if photo_path and os.path.exists(photo_path):
+                self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세 (실시간 포착)*")
+                await asyncio.sleep(3)
+            self.send_message(f"🚨 *[실시간 조건 포착 AI 보고서]*\n종목명: {market_data['name']} ({code})\n\n{report}")
 
 if __name__ == '__main__':
     bot = TelegramBot()
