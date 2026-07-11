@@ -108,7 +108,8 @@ class API(Client):
                 await cancel(self._recv_task)
 
                 # Connect http server
-                await super().connect(self._appkey, self._secretkey, headers)
+                self._headers = headers if headers is not None else self._headers
+                await self._connect(self._appkey, self._secretkey, self._headers)
                 if not (token := self.token()):
                     raise RuntimeError("Not connected: token is not available.")
 
