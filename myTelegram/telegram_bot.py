@@ -9,6 +9,7 @@ import logging
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+from myBacktest import Backtester
 
 
 class TelegramBot:
@@ -36,6 +37,7 @@ class TelegramBot:
         self.logger.info("텔레그램 봇 준비 완료.")
 
         self.waiting_for_ask = set()
+        self.waiting_for_backtest = set()
         self.kiwoom_codes = None
 
     def _setup_logging(self):
@@ -172,6 +174,8 @@ class TelegramBot:
         self.add_command_handler("defcon", self.defcon_command)
         self.add_command_handler("balance", self.balance_command)
         self.add_command_handler("portfolio", self.balance_command)
+        self.add_command_handler("backtest", self.backtest_command)
+        self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.add_message_handler(self.handle_text_message)
 
         # 텔레그램 기본 '메뉴' 버튼에 등록
@@ -179,6 +183,7 @@ class TelegramBot:
             ("start", "시작 및 키보드 버튼 표시"),
             ("defcon", "시장 지표 및 데프콘 계산"),
             ("ask", "종목 분석 요청 (예: /ask 삼성전자)"),
+            ("backtest", "종목 백테스팅 (예: /backtest 삼성전자)"),
             ("balance", "실시간 자산 및 포트폴리오 조회")
         ])
 
@@ -187,20 +192,22 @@ class TelegramBot:
         하단에 고정되는 큼직한 버튼(키보드) 생성
         """
         self.waiting_for_ask.discard(update.effective_user.id)
+        self.waiting_for_backtest.discard(update.effective_user.id)
 
         keyboard = [
-            ["/defcon", "/ask", "/balance"]
+            ["/defcon", "/ask", "/balance", "/backtest"]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             "반갑습니다! 키움증권 AI 봇입니다.\n"
             "아래 버튼을 누르거나 채팅창 입력칸의 '/' (또는 '메뉴') 버튼을 눌러 명령을 내려주세요.\n"
-            "*(/ask 버튼을 누른 후 이어서 종목명을 입력하시면 됩니다)*",
+            "*(/ask 또는 /backtest 버튼을 누른 후 이어서 종목명을 입력하시면 됩니다)*",
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
 
     async def ask_command(self, update, context):
+        self.waiting_for_backtest.discard(update.effective_user.id)
         if not context.args:
             self.waiting_for_ask.add(update.effective_user.id)
             await update.message.reply_text("분석할 종목명을 채팅창에 입력해주세요. (예: 삼성전자)")
@@ -215,6 +222,129 @@ class TelegramBot:
             self.waiting_for_ask.remove(user_id)
             stock_name = update.message.text.strip()
             await self.analyze_stock(update, stock_name)
+        elif user_id in self.waiting_for_backtest:
+            self.waiting_for_backtest.remove(user_id)
+            stock_name = update.message.text.strip()
+            await self.prompt_strategy_selection(update, stock_name)
+
+    async def backtest_command(self, update, context):
+        self.waiting_for_ask.discard(update.effective_user.id)
+        if not context.args:
+            self.waiting_for_backtest.add(update.effective_user.id)
+            await update.message.reply_text("백테스팅할 종목명을 채팅창에 입력해주세요. (예: 삼성전자)")
+            return
+
+        stock_name = " ".join(context.args)
+        await self.prompt_strategy_selection(update, stock_name)
+
+    async def prompt_strategy_selection(self, update, stock_name):
+        # 1. 종목 코드로 변환
+        if not self.kiwoom_codes:
+            kospi_codes = await self.kiwoom_bot.api.stock_list("0")   # KOSPI
+            kosdaq_codes = await self.kiwoom_bot.api.stock_list("10") # KOSDAQ
+            self.kiwoom_codes = {'list': kospi_codes.get('list', []) + kosdaq_codes.get('list', [])}
+
+        code = next((item.get('code') for item in self.kiwoom_codes.get('list', []) if item.get('name') == stock_name), None)
+        if not code:
+            code = next((item.get('code') for item in self.kiwoom_codes.get('list', []) if item.get('name') == stock_name.upper()), None)
+
+        if not code:
+            await update.message.reply_text(f"'{stock_name}' 종목을 찾을 수 없습니다.")
+            return
+
+        # 2. 인라인 키보드 생성 (설명 포함)
+        keyboard = [
+            [InlineKeyboardButton("SMA 교차 (5일/20일선 골든&데드크로스)", callback_data=f"bt:{code}:SMA")],
+            [InlineKeyboardButton("RSI 역추세 (RSI 30 이하 매수 / 70 이상 매도)", callback_data=f"bt:{code}:RSI")],
+            [InlineKeyboardButton("볼린저 밴드 (하한선 매수 / 상한선 매도)", callback_data=f"bt:{code}:BB")],
+            [InlineKeyboardButton("MACD 모멘텀 (MACD & 시그널선 교차)", callback_data=f"bt:{code}:MACD")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            f"📊 *{stock_name} ({code})* 백테스팅\n"
+            f"시뮬레이션할 전략을 선택해주세요:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+
+    async def handle_callback_query(self, update, context):
+        query = update.callback_query
+        await query.answer()
+
+        data = query.data
+        if data.startswith("bt:"):
+            parts = data.split(":")
+            if len(parts) == 3:
+                _, code, strategy = parts
+                
+                # 종목명 조회
+                stock_name = code
+                if self.kiwoom_codes:
+                    stock_name = next((item.get('name') for item in self.kiwoom_codes.get('list', []) if item.get('code') == code), code)
+                
+                # 진행 상태 표시
+                await query.edit_message_text(text=f"🔄 {stock_name} ({code}) 종목에 대해 {strategy} 전략 백테스팅을 실행합니다. 잠시만 기다려주세요...")
+                
+                # 비동기 백테스트 구동
+                await self.run_backtest_and_send(query, code, stock_name, strategy)
+
+    async def run_backtest_and_send(self, query, code, stock_name, strategy):
+        # 1. 일봉 캔들 데이터 조회 (최근 1년 = 365일)
+        start_date = (datetime.now() - timedelta(days=365)).strftime("%Y%m%d")
+        try:
+            df = await self.kiwoom_bot.candle(code, period="day", ctype="stock", start=start_date)
+            if df is None or df.empty or len(df) < 20:
+                await query.edit_message_text(text=f"❌ '{stock_name}' 종목의 최근 일봉 데이터가 부족하거나 가져오지 못했습니다. (가져온 데이터 개수: {len(df) if df is not None else 0})")
+                return
+
+            # 2. 백테스터 실행
+            tester = Backtester(df, initial_capital=10000000.0)
+            
+            if strategy == 'SMA':
+                res = tester.run_sma(5, 20)
+                strategy_desc = "이동평균선 교차 (5일/20일)"
+            elif strategy == 'RSI':
+                res = tester.run_rsi(14, 30, 70)
+                strategy_desc = "RSI 과매수/과매도 (30/70)"
+            elif strategy == 'BB':
+                res = tester.run_bb(20, 2.0)
+                strategy_desc = "볼린저 밴드 (20일, 2std)"
+            elif strategy == 'MACD':
+                res = tester.run_macd(12, 26, 9)
+                strategy_desc = "MACD 모멘텀 교차"
+            else:
+                await query.edit_message_text(text=f"❌ 지원되지 않는 전략입니다: {strategy}")
+                return
+
+            # 3. 차트 생성
+            chart_path = tester.plot_result(strategy, stock_name)
+
+            # 4. 성과 지표 보고서 포맷 작성
+            sign = "+" if res['total_return'] >= 0 else ""
+            report_msg = (
+                f"📊 *[{stock_name} ({code}) {strategy_desc} 백테스트 결과]*\n"
+                f"- *분석 기간*: {df.index[0].strftime('%Y-%m-%d')} ~ {df.index[-1].strftime('%Y-%m-%d')} ({len(df)} 영업일)\n"
+                f"- *초기 자금*: {tester.initial_capital:,.0f}원\n"
+                f"- *최종 자산*: {res['final_value']:,.0f}원\n"
+                f"- *누적 수익률*: *{sign}{res['total_return']:.2f}%*\n"
+                f"- *연평균 복리 수익률(CAGR)*: *{sign}{res['cagr']:.2f}%*\n"
+                f"- *최대 낙폭(MDD)*: *{res['mdd']:.2f}%*\n"
+                f"- *총 거래 횟수*: {res['num_trades']}회\n"
+                f"- *거래 승률*: {res['win_rate']:.2f}%\n"
+            )
+
+            # 메시지 변경 완료 안내
+            await query.edit_message_text(text=f"✅ {stock_name} ({code}) 백테스팅 완료! 결과 차트와 요약 리포트를 전송합니다.")
+            
+            # 이미지와 텍스트 전송
+            if chart_path and os.path.exists(chart_path):
+                self.send_photo(chart_path, caption=f"*{stock_name} ({code}) - {strategy_desc} 수익률 분석 차트*")
+                await asyncio.sleep(2)
+            self.send_message(report_msg)
+
+        except Exception as e:
+            self.logger.error(f"백테스트 실행 중 오류 발생: {e}", exc_info=True)
+            await query.edit_message_text(text=f"❌ 백테스팅 중 오류가 발생했습니다: {str(e)}")
 
     async def defcon_command(self, update, context):
         self.waiting_for_ask.discard(update.effective_user.id)
