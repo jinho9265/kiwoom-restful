@@ -127,7 +127,7 @@ class TelegramBot:
 
     async def set_menu_commands(self, commands: list):
         """
-        텔레그램 좌측 하단 '메뉴' 버튼에 표시될 명령어 목록을 설정합니다.
+        텔레그램 채팅창 입력칸의 메뉴(또는 '/') 버튼에 표시될 명령어 목록을 설정합니다.
         commands: [("명령어", "설명"), ...] 형태의 리스트
         """
         if self.app:
@@ -194,7 +194,7 @@ class TelegramBot:
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
             "반갑습니다! 키움증권 AI 봇입니다.\n"
-            "아래 버튼을 누르거나 좌측 하단의 '메뉴'를 이용해 명령을 내려주세요.\n"
+            "아래 버튼을 누르거나 채팅창 입력칸의 '/' (또는 '메뉴') 버튼을 눌러 명령을 내려주세요.\n"
             "*(/ask 버튼을 누른 후 이어서 종목명을 입력하시면 됩니다)*",
             reply_markup=reply_markup,
             parse_mode="Markdown"
