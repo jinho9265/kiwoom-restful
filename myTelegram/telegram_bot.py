@@ -188,7 +188,7 @@ class TelegramBot:
         self.waiting_for_ask.discard(update.effective_user.id)
 
         keyboard = [
-            ["/defcon", "/ask"]
+            ["/defcon", "/ask", "/balance"]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         await update.message.reply_text(
