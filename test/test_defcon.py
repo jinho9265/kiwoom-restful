@@ -25,6 +25,9 @@ async def test_defcon_report():
     defcon_level = market_monitor.calculate_defcon(indicators)
     
     print(f"계산된 룰베이스 데프콘 레벨: {defcon_level}")
+    print("차트 이미지 생성 중...")
+    chart_path = market_monitor.generate_dashboard_chart(indicators, defcon_level)
+    print(f"차트 이미지 저장 경로: {chart_path}")
     print("AI 보고서 생성 요청 중...")
     
     report = await ai_engine.get_defcon_report(indicators, defcon_level)

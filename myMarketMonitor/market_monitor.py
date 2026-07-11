@@ -320,10 +320,10 @@ class MarketMonitor:
         # 5. 버핏 지수 (SPX/GDP) 임계값 (상황에 맞게 비율 조정 필요)
         buffett = indicators.get('BUFFETT')
         if buffett is not None:
-            if buffett >= 22: score += 4
-            elif buffett >= 20: score += 3
-            elif buffett >= 18: score += 2
-            elif buffett >= 16: score += 1
+            if buffett >= 28: score += 4
+            elif buffett >= 25: score += 3
+            elif buffett >= 22: score += 2
+            elif buffett >= 19: score += 1
 
         # 총점 기반으로 DEFCON 단계 산정 (소수점 한 자리)
         # 기존과 동일하게 15점 이상을 DEFCON 1.0으로 두고, 0점을 5.0으로 선형 변환합니다.
@@ -350,12 +350,12 @@ class MarketMonitor:
             unrate = indicators.get('UNRATE')
             buffett = indicators.get('BUFFETT')
 
-            # 0~100 리스크 지수화 (높을수록 위기, 실제 DEFCON 점수 임계값에 맞춰 동기화)
-            vix_val = max(0.0, min(100.0, ((vix - 10.0) / 30.0) * 100.0)) if vix is not None else 50.0
-            t10y2y_val = max(0.0, min(100.0, ((0.5 - t10y2y) / 1.0) * 100.0)) if t10y2y is not None else 50.0
-            hy_val = max(0.0, min(100.0, ((hy_spread - 3.0) / 3.0) * 100.0)) if hy_spread is not None else 50.0
-            unrate_val = max(0.0, min(100.0, ((unrate - 3.5) / 2.5) * 100.0)) if unrate is not None else 50.0
-            buffett_val = max(0.0, min(100.0, ((buffett - 16.0) / 6.0) * 100.0)) if buffett is not None else 50.0
+            # 0~100 리스크 변환 (역사상 최고점의 1.5배를 Max로 하여 각 축별 개별 스케일 플롯)
+            vix_val = max(0.0, min(100.0, (vix / 120.0) * 100.0)) if vix is not None else 50.0
+            t10y2y_val = max(0.0, min(100.0, ((1.0 - t10y2y) / 3.0) * 100.0)) if t10y2y is not None else 50.0
+            hy_val = max(0.0, min(100.0, ((hy_spread - 2.0) / 13.0) * 100.0)) if hy_spread is not None else 50.0
+            unrate_val = max(0.0, min(100.0, ((unrate - 3.0) / 12.0) * 100.0)) if unrate is not None else 50.0
+            buffett_val = max(0.0, min(100.0, ((buffett - 10.0) / 26.0) * 100.0)) if buffett is not None else 50.0
 
             stats = [vix_val, t10y2y_val, hy_val, unrate_val, buffett_val]
 
@@ -378,11 +378,37 @@ class MarketMonitor:
             ax.set_theta_offset(np.pi / 2)
             ax.set_theta_direction(-1)
 
-            # 레이블 및 틱 설정
+            # 레이블 및 틱 설정 (여백 부여 및 개별 틱 렌더링)
             plt.xticks(angles[:-1], labels, color='#ffffff', size=10, fontweight='bold')
-            ax.set_rlabel_position(0)
-            plt.yticks([25, 50, 75, 100], ["25", "50", "75", "100"], color="#8e8e93", size=8)
+            ax.tick_params(axis='x', pad=15)
+            
+            # 공통 y축 틱은 숨기고 개별 축 위에 수치 배치
+            plt.yticks([], [])
             plt.ylim(0, 100)
+
+            # 각 축별 동심원(25, 50, 75, 100)에 기재할 실제 눈금 값
+            ticks_data = {
+                0: [30, 60, 90, 120],            # VIX
+                1: [0.25, -0.5, -1.25, -2.0],     # T10Y2Y
+                2: [5.25, 8.5, 11.75, 15.0],      # HY-SPREAD
+                3: [6.0, 9.0, 12.0, 15.0],        # UNRATE
+                4: [16.5, 23.0, 29.5, 36.0]       # BUFFETT
+            }
+
+            for idx, angle in enumerate(angles[:-1]):
+                ticks = ticks_data[idx]
+                for r_val, tick_val in zip([25, 50, 75, 100], ticks):
+                    # 텍스트 중첩 방지용 미세 편각 오프셋
+                    txt_angle = angle + 0.08
+                    if idx == 1:
+                        fmt_val = f"{tick_val:+.2f}%"
+                    elif idx in [2, 3]:
+                        fmt_val = f"{tick_val:.1f}%"
+                    else:
+                        fmt_val = f"{tick_val:.1f}" if isinstance(tick_val, float) else str(tick_val)
+                    
+                    ax.text(txt_angle, r_val, fmt_val, color="#8e8e93", size=7,
+                            ha='center', va='center')
 
             # 데프콘 단계별 색상 지정
             if defcon_level <= 2.0:
