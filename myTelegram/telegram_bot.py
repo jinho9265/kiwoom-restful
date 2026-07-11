@@ -575,7 +575,7 @@ class TelegramBot:
             
             os.makedirs("tmp_charts", exist_ok=True)
             chart_path = "tmp_charts/portfolio_pie.png"
-            plt.savefig(chart_path, dpi=150, transparent=True)
+            plt.savefig(chart_path, dpi=150, transparent=False)
             plt.close()
             return chart_path
         except Exception as e:
