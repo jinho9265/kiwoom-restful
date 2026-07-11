@@ -245,6 +245,7 @@ class TelegramBot:
             # 일봉 캔들 데이터 조회 및 기술적 지표 계산 (최근 180일 데이터를 확보하여 앞부분 지표 손실 보완)
             start_date = (datetime.now() - timedelta(days=180)).strftime("%Y%m%d")
             technical_str = ""
+            photo_path = None # 이미지 전송 대기를 위해 경로 변수 선언
             try:
                 # self.kiwoom_bot.candle은 DataFrame을 반환함
                 df = await self.kiwoom_bot.candle(code, period="day", ctype="stock", start=start_date)
@@ -353,12 +354,9 @@ class TelegramBot:
                             savefig=photo_path, 
                             title=f"\n{market_data['name']} ({code}) 1-Month Trend"
                         )
-                        
-                        # 텔레그램으로 이미지 발송
-                        self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세*")
-                        await asyncio.sleep(3) # 발송 대기
                     except Exception as chart_err:
-                        self.logger.error(f"캔들 차트 이미지 생성/전송 중 오류 발생: {chart_err}", exc_info=True)
+                        self.logger.error(f"캔들 차트 이미지 생성 중 오류 발생: {chart_err}", exc_info=True)
+                        photo_path = None
                 else:
                     self.logger.warning(f"'{stock_name}' 종목의 기술 분석 데이터가 충분하지 않습니다. (가져온 데이터 개수: {len(df) if df is not None else 0})")
             except Exception as e:
@@ -367,6 +365,10 @@ class TelegramBot:
             report = await self.ai_engine.get_recommendation(market_data, asset_data, technical_data=technical_str)
             if report:
                 self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
+                # AI 답변이 준비되었을 때, 캔들 차트와 설명 텍스트를 연달아 전송
+                if photo_path and os.path.exists(photo_path):
+                    self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세*")
+                    await asyncio.sleep(3) # 발송 대기
                 self.send_message(f"[{market_data['name']}] AI 의견:\n{report}")
                 await asyncio.sleep(5)
         else:
