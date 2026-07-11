@@ -531,9 +531,24 @@ class TelegramBot:
         import matplotlib
         matplotlib.use('Agg')
         import matplotlib.pyplot as plt
+        import matplotlib.font_manager as fm
         import os
         
         try:
+            # 다크 테마 및 한글 폰트 설정
+            plt.style.use('dark_background')
+            
+            font_list = ['Malgun Gothic', 'NanumGothic', 'AppleGothic', 'sans-serif']
+            font_set = False
+            for font in font_list:
+                if any(f.name == font for f in fm.fontManager.ttflist):
+                    plt.rcParams['font.family'] = font
+                    font_set = True
+                    break
+            if not font_set:
+                plt.rcParams['font.family'] = 'sans-serif'
+            plt.rcParams['axes.unicode_minus'] = False # 마이너스 기호 깨짐 방지
+
             # 데이터 취합
             labels = ["CASH"]
             sizes = [cash]
@@ -541,9 +556,6 @@ class TelegramBot:
             for h in holdings:
                 labels.append(h["name"])
                 sizes.append(h["eval_amt"])
-                
-            # 다크 테마
-            plt.style.use('dark_background')
             fig, ax = plt.subplots(figsize=(6, 5))
             
             # 은은하고 세련된 색상 조합
