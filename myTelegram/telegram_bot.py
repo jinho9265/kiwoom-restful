@@ -1,8 +1,8 @@
 # telegram_bot.py
 
 import telegram
-from telegram import ReplyKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters
+from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 import myConfig
 import asyncio
 import logging
@@ -42,12 +42,13 @@ class TelegramBot:
         # getLogger()는 이미 설정된 로거가 있다면 그 인스턴스를 반환합니다.
         self.logger = logging.getLogger(__name__)
 
-    def send_photo(self, photo_path, caption="", parse_mode="Markdown"):
+    def send_photo(self, photo_path, caption="", parse_mode="Markdown", reply_markup=None):
         """
         지정된 채팅 ID로 사진을 보냅니다.
         :param photo_path: 보낼 사진의 로컬 파일 경로
         :param caption: 사진 설명 텍스트
         :param parse_mode: 텍스트 포맷 옵션 (Markdown, HTML 등)
+        :param reply_markup: 인라인 키보드 등 마크업 옵션
         """
         if not self.token:
             self.logger.warning("텔레그램 봇 토큰이 없어 사진을 보낼 수 없습니다.")
@@ -60,11 +61,11 @@ class TelegramBot:
                 for chat_id in chat_ids:
                     try:
                         with open(photo_path, 'rb') as photo:
-                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode=parse_mode)
+                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode=parse_mode, reply_markup=reply_markup)
                     except Exception as parse_err:
                         self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
                         with open(photo_path, 'rb') as photo:
-                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption)
+                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, reply_markup=reply_markup)
                 self.logger.info(f"텔레그램 사진 발송 성공 (경로: {photo_path})")
             except Exception as e:
                 self.logger.error(f"텔레그램 사진 발송 실패: {e}")
@@ -81,11 +82,12 @@ class TelegramBot:
         else:
             asyncio.run(_send())
 
-    def send_message(self, message, parse_mode="Markdown"):
+    def send_message(self, message, parse_mode="Markdown", reply_markup=None):
         """
         지정된 채팅 ID로 메시지를 보냅니다.
         :param message: 보낼 메시지 문자열
         :param parse_mode: 텍스트 포맷 옵션 (Markdown, HTML 등)
+        :param reply_markup: 인라인 키보드 등 마크업 옵션
         """
         if not self.token:
             self.logger.warning("텔레그램 봇 토큰이 없어 메시지를 보낼 수 없습니다.")
@@ -97,10 +99,10 @@ class TelegramBot:
                 chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
                 for chat_id in chat_ids:
                     try:
-                        await self.app.bot.send_message(chat_id=chat_id, text=message, parse_mode=parse_mode)
+                        await self.app.bot.send_message(chat_id=chat_id, text=message, parse_mode=parse_mode, reply_markup=reply_markup)
                     except Exception as parse_err:
                         self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
-                        await self.app.bot.send_message(chat_id=chat_id, text=message)
+                        await self.app.bot.send_message(chat_id=chat_id, text=message, reply_markup=reply_markup)
                 self.logger.info(f"텔레그램 메시지 발송 성공 (포맷: {parse_mode})")
             except Exception as e:
                 self.logger.error(f"텔레그램 메시지 발송 실패: {e}")
@@ -170,6 +172,8 @@ class TelegramBot:
         self.add_command_handler("ask", self.ask_command)
         self.add_command_handler("defcon", self.defcon_command)
         self.add_message_handler(self.handle_text_message)
+        if self.app:
+            self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
 
         # 텔레그램 기본 '메뉴' 버튼에 등록
         await self.set_menu_commands([
@@ -367,13 +371,100 @@ class TelegramBot:
                 self.logger.info(f"[{market_data['name']}] AI 분석 결과:\n{report}")
                 # AI 답변이 준비되었을 때, 캔들 차트와 설명 텍스트를 연달아 전송
                 if photo_path and os.path.exists(photo_path):
-                    self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세*")
+                    # 인라인 주문 키보드 구성
+                    keyboard = [
+                        [
+                            InlineKeyboardButton("시장가 매수 (10%)", callback_data=f"buy_mkt_{code}_10"),
+                            InlineKeyboardButton("시장가 매수 (50%)", callback_data=f"buy_mkt_{code}_50"),
+                        ],
+                        [
+                            InlineKeyboardButton("시장가 매수 (전량)", callback_data=f"buy_mkt_{code}_100"),
+                            InlineKeyboardButton("시장가 매도 (전량)", callback_data=f"sell_mkt_{code}_100"),
+                        ]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    self.send_photo(photo_path, caption=f"*{market_data['name']} ({code}) 최근 1개월 캔들 차트 추세*", reply_markup=reply_markup)
                     await asyncio.sleep(3) # 발송 대기
                 self.send_message(f"[{market_data['name']}] AI 의견:\n{report}")
                 await asyncio.sleep(5)
         else:
             await update.message.reply_text(f"'{stock_name}' 종목을 찾을 수 없습니다.")
 
+    async def handle_callback_query(self, update, context):
+        """인라인 버튼 클릭 시 발생하는 주문 콜백 쿼리를 처리합니다."""
+        query = update.callback_query
+        await query.answer()
+        
+        data = query.data
+        if not data.startswith(("buy_mkt_", "sell_mkt_")):
+            return
+            
+        parts = data.split("_")
+        action = parts[0]       # buy / sell
+        code = parts[2]         # 종목코드
+        percent = int(parts[3]) # 가용현금/수량 퍼센트 (10, 50, 100 등)
+        
+        # 1. 실시간 시세 정보 조회로 현재가 파악
+        try:
+            stock_info = await self.kiwoom_bot.api.get_stock_info(code)
+            current_price = abs(int(stock_info.get('cur_prc', 0)))
+            stock_name = stock_info.get('stk_nm', code)
+        except Exception as e:
+            self.logger.error(f"주문용 종목 정보 조회 실패: {e}")
+            await query.message.reply_text(f"❌ [{code}] 종목 정보 조회 실패로 주문을 취소합니다.")
+            return
+
+        if current_price <= 0:
+            await query.message.reply_text(f"❌ [{stock_name}] 현재가 유효성 검증 실패 (현재가: {current_price}원)")
+            return
+
+        # 2. 자산 자금 기반 가상 수량 계산 (현금 주문 기준)
+        cash = 10000000 # 1,000만원 가상 예수금
+        
+        if action == "buy":
+            buy_budget = cash * (percent / 100)
+            qty = int(buy_budget / current_price)
+            if qty <= 0:
+                await query.message.reply_text(f"❌ 예수금 대비 비중 부족으로 1주도 살 수 없습니다. (현재가: {current_price}원)")
+                return
+            api_id = "kt10000" # 매수 TR
+            action_kor = "시장가 매수"
+        else:
+            # 매도 시 가상 보유 수량을 10주 기준으로 비중 삭감
+            qty = int(10 * (percent / 100))
+            if qty <= 0:
+                qty = 1
+            api_id = "kt10001" # 매도 TR
+            action_kor = "시장가 매도"
+
+        # 3. 키움증권 OpenAPI+ REST 주문 API 전송
+        try:
+            endpoint = "/api/dostk/ordr"
+            order_data = {
+                "dmst_stex_tp": "KRX",
+                "stk_cd": code,
+                "ord_qty": str(qty),
+                "ord_uv": "0",  # 시장가이므로 단가는 0
+                "trde_tp": "3"  # 3: 시장가
+            }
+            
+            # API 호출
+            res = await self.kiwoom_bot.api.request(endpoint, api_id, data=order_data)
+            ord_no = res.get("ord_no", "N/A")
+            
+            success_msg = (
+                f"🚨 *[키움증권 주문 접수 완료]*\n"
+                f"- *종목*: {stock_name} ({code})\n"
+                f"- *구분*: {action_kor} ({percent}%)\n"
+                f"- *수량*: {qty}주\n"
+                f"- *현재 단가*: {current_price:,.0f}원\n"
+                f"- *주문 번호*: `{ord_no}`"
+            )
+            await query.message.reply_text(success_msg, parse_mode="Markdown")
+        except Exception as order_err:
+            self.logger.error(f"키움 API 주문 요청 중 오류: {order_err}")
+            await query.message.reply_text(f"❌ [{stock_name}] 주문 접수 중 키움 API 오류 발생: {order_err}")
+ 
 if __name__ == '__main__':
     bot = TelegramBot()
     bot.logger.info("텔레그램 봇 테스트를 시작합니다.")
