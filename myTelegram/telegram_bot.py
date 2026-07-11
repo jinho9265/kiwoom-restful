@@ -355,7 +355,7 @@ class TelegramBot:
                             style=s, 
                             volume=True, 
                             savefig=photo_path, 
-                            title=f"\n{market_data['name']} ({code}) 1-Month Trend"
+                            title=f"\n{code} 1-Month Trend"
                         )
                     except Exception as chart_err:
                         self.logger.error(f"캔들 차트 이미지 생성 중 오류 발생: {chart_err}", exc_info=True)
