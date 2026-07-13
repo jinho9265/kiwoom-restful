@@ -92,6 +92,33 @@ class DailyFileHandler(logging.Handler):
         super().close()
 
 
+class TelegramLoggingHandler(logging.Handler):
+    """ERROR 레벨 이상의 로그를 텔레그램 메시지로 자동 전송하는 로깅 핸들러"""
+    def __init__(self, telegram_bot, level=logging.ERROR):
+        super().__init__(level)
+        self.telegram_bot = telegram_bot
+
+    def emit(self, record):
+        try:
+            # 텔레그램 전송 무한 루프 방지 (텔레그램 봇 자체 에러 및 httpx/httpcore 네트워크 에러 제외)
+            logger_name = record.name.lower()
+            if (logger_name.startswith("mytelegram") or 
+                "telegram" in logger_name or 
+                logger_name.startswith("httpx") or 
+                logger_name.startswith("httpcore")):
+                return
+            
+            log_entry = self.format(record)
+            # 텔레그램 메시지 길이 제한(4096자) 준수
+            if len(log_entry) > 4000:
+                log_entry = log_entry[:3900] + "\n... (중략) ..."
+            
+            message = f"🚨 *[시스템 오류 알림]*\n```\n{log_entry}\n```"
+            self.telegram_bot.send_message(message, parse_mode="Markdown")
+        except Exception:
+            self.handleError(record)
+
+
 async def main():
     # 로깅 설정
     logging.basicConfig(
@@ -104,39 +131,49 @@ async def main():
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     telegram_bot = TelegramBot()
-    ai_engine = AIEngine()
-    market_monitor = MarketMonitor(telegram_bot, ai_engine)
+    
+    # 텔레그램 에러 알림 핸들러 등록
+    tg_handler = TelegramLoggingHandler(telegram_bot)
+    tg_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logging.getLogger().addHandler(tg_handler)
 
-    async with Bot(REAL, myConfig.KIWOOM_APP_KEY, myConfig.KIWOOM_SECRET_KEY) as bot:
-        await telegram_bot.setup_handlers(bot, ai_engine, market_monitor)
-        await telegram_bot.start_polling()
+    try:
+        ai_engine = AIEngine()
+        market_monitor = MarketMonitor(telegram_bot, ai_engine)
 
-        # 콜백 등록
-        bot.api.add_callback_on_real_data(
-            real_type="CNSRLST",
-            callback=on_receive_conditional_search_list
-        )
-        bot.api.add_callback_on_real_data(
-            real_type="CNSRREQ",
-            callback=functools.partial(handle_search_request, ai_engine=ai_engine, telegram_bot=telegram_bot)
-        )
+        async with Bot(REAL, myConfig.KIWOOM_APP_KEY, myConfig.KIWOOM_SECRET_KEY) as bot:
+            await telegram_bot.setup_handlers(bot, ai_engine, market_monitor)
+            await telegram_bot.start_polling()
 
-        bot.debug(False)
-        await bot.connect()
+            # 콜백 등록
+            bot.api.add_callback_on_real_data(
+                real_type="CNSRLST",
+                callback=on_receive_conditional_search_list
+            )
+            bot.api.add_callback_on_real_data(
+                real_type="CNSRREQ",
+                callback=functools.partial(handle_search_request, ai_engine=ai_engine, telegram_bot=telegram_bot)
+            )
 
-        if myConfig.ENABLE_CONDITION_SEARCH:
-            await bot.api.conditional_search_list()
-            # 서버가 조건검색 목록을 충분히 로드할 수 있도록 잠시 대기합니다.
-            await asyncio.sleep(2)
+            bot.debug(False)
+            await bot.connect()
 
-        while True:
             if myConfig.ENABLE_CONDITION_SEARCH:
-                logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 조건검색을 요청합니다.")
-                # ⚠️ 주의: '0' 대신 앞서 출력된 실제 일련번호(seq)를 입력해야 합니다. (예: '1', '2' 등)
-                await bot.api.conditional_search_request('0', '0')
+                await bot.api.conditional_search_list()
+                # 서버가 조건검색 목록을 충분히 로드할 수 있도록 잠시 대기합니다.
+                await asyncio.sleep(2)
 
-            # 10분(600초) 대기 후 다시 요청합니다.
-            await asyncio.sleep(600)
+            while True:
+                if myConfig.ENABLE_CONDITION_SEARCH:
+                    logger.info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 조건검색을 요청합니다.")
+                    # ⚠️ 주의: '0' 대신 앞서 출력된 실제 일련번호(seq)를 입력해야 합니다. (예: '1', '2' 등)
+                    await bot.api.conditional_search_request('0', '0')
+
+                # 10분(600초) 대기 후 다시 요청합니다.
+                await asyncio.sleep(600)
+    except Exception as e:
+        logger.exception("프로그램 메인 루프에서 치명적인 예외가 발생했습니다.")
+        raise
 
 if __name__ == "__main__":
     asyncio.run(main())
