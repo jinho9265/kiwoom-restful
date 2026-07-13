@@ -61,6 +61,35 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
 
             # 무료 API 요청 한도(15 RPM)를 초과하지 않도록 종목당 5초씩 대기합니다.
             await asyncio.sleep(5)
+class DailyFileHandler(logging.Handler):
+    """날짜별로 다른 로그 파일(YYYYMMDD_makemoney.log)에 로깅을 기록하는 핸들러"""
+    def __init__(self, encoding="utf-8"):
+        super().__init__()
+        self.encoding = encoding
+        self.current_date = None
+        self._handler = None
+
+    def emit(self, record):
+        try:
+            log_date = datetime.fromtimestamp(record.created).strftime("%Y%m%d")
+            if log_date != self.current_date:
+                self.current_date = log_date
+                if self._handler:
+                    self._handler.close()
+                filename = f"{log_date}_makemoney.log"
+                self._handler = logging.FileHandler(filename, encoding=self.encoding)
+                if self.formatter:
+                    self._handler.setFormatter(self.formatter)
+                if self.level:
+                    self._handler.setLevel(self.level)
+            self._handler.emit(record)
+        except Exception:
+            self.handleError(record)
+
+    def close(self):
+        if self._handler:
+            self._handler.close()
+        super().close()
 
 
 async def main():
@@ -68,7 +97,7 @@ async def main():
     logging.basicConfig(
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        handlers=[logging.FileHandler('makemoney.log', encoding='utf-8'), logging.StreamHandler()]
+        handlers=[DailyFileHandler(encoding='utf-8'), logging.StreamHandler()]
     )
 
     # 텔레그램 봇의 getUpdates 폴링으로 인한 httpx 로그가 과도하게 쌓이는 것을 방지
