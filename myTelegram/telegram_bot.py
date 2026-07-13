@@ -10,6 +10,7 @@ import logging
 import pandas as pd
 from datetime import datetime, timedelta
 import os
+import sys
 from myBacktest import Backtester
 
 
@@ -190,6 +191,7 @@ class TelegramBot:
         self.add_command_handler("balance", self.balance_command)
         self.add_command_handler("portfolio", self.balance_command)
         self.add_command_handler("backtest", self.backtest_command)
+        self.add_command_handler("restart", self.restart_command)
         self.app.add_handler(CallbackQueryHandler(self.handle_callback_query))
         self.add_message_handler(self.handle_text_message)
 
@@ -199,7 +201,8 @@ class TelegramBot:
             ("defcon", "시장 지표 및 데프콘 계산"),
             ("ask", "종목 분석 요청 (예: /ask 삼성전자)"),
             ("backtest", "종목 백테스팅 (예: /backtest 삼성전자)"),
-            ("balance", "실시간 자산 및 포트폴리오 조회")
+            ("balance", "실시간 자산 및 포트폴리오 조회"),
+            ("restart", "프로그램 안전 재시작 (관리자 전용)")
         ])
 
     async def start_command(self, update, context):
@@ -220,6 +223,43 @@ class TelegramBot:
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
+
+    async def restart_command(self, update, context):
+        """
+        봇과 관련 리소스를 정리하고 프로그램을 안전하게 재시작합니다.
+        """
+        # 권한 확인 (관리자 확인)
+        allowed_chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
+        user_chat_id = str(update.effective_chat.id)
+        user_id = str(update.effective_user.id)
+        
+        if user_chat_id not in allowed_chat_ids and user_id not in allowed_chat_ids:
+            await update.message.reply_text("❌ 권한이 없습니다. 재시작 명령은 지정된 관리자만 내릴 수 있습니다.")
+            return
+
+        await update.message.reply_text("🔄 프로그램을 재시작합니다. 잠시만 기다려주세요...")
+        
+        # 리소스 정리 (Kiwoom API 연결 종료 등)
+        if hasattr(self, 'kiwoom_bot') and self.kiwoom_bot:
+            try:
+                self.logger.info("재시작 준비: Kiwoom API 연결을 안전하게 종료합니다.")
+                await self.kiwoom_bot.close()
+            except Exception as e:
+                self.logger.error(f"Kiwoom API 종료 중 오류 발생: {e}")
+
+        # Telegram Bot의 Application 정리
+        if self.app:
+            try:
+                self.logger.info("재시작 준비: 텔레그램 봇을 종료합니다.")
+                await self.app.updater.stop()
+                await self.app.stop()
+                await self.app.shutdown()
+            except Exception as e:
+                self.logger.error(f"텔레그램 봇 종료 중 오류 발생: {e}")
+
+        # 프로세스 교체 (execv)
+        self.logger.info("프로그램 재시작 실행 (execv)")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
 
     async def ask_command(self, update, context):
         self.waiting_for_backtest.discard(update.effective_user.id)
