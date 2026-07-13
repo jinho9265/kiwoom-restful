@@ -3,6 +3,7 @@
 import telegram
 from telegram import ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler
+from telegram.request import HTTPXRequest
 import myConfig
 import asyncio
 import logging
@@ -29,7 +30,17 @@ class TelegramBot:
             return
 
         self.token = myConfig.TELEGRAM_BOT_TOKEN
-        self.app = ApplicationBuilder().token(self.token).build()
+        # HTTP/1.1 사용 설정 및 타임아웃, 커넥션 풀 조정을 통해 httpx.ReadError 및 네트워크 타임아웃 방지
+        request_config = HTTPXRequest(
+            http_version="1.1",
+            connection_pool_size=512,
+            connect_timeout=30.0,
+            read_timeout=30.0,
+            write_timeout=30.0,
+            pool_timeout=5.0
+        )
+        self.app = ApplicationBuilder().token(self.token).request(request_config).build()
+        self.app.add_error_handler(self.error_handler)
         try:
             self.loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -44,6 +55,10 @@ class TelegramBot:
         """로깅 설정을 초기화합니다."""
         # getLogger()는 이미 설정된 로거가 있다면 그 인스턴스를 반환합니다.
         self.logger = logging.getLogger(__name__)
+
+    async def error_handler(self, update: object, context) -> None:
+        """봇 내부 또는 폴링 중에 발생한 오류를 처리하고 기록합니다."""
+        self.logger.error("텔레그램 봇 내부 오류 발생: %s", context.error, exc_info=context.error)
 
     def send_photo(self, photo_path, caption="", parse_mode="Markdown"):
         """
