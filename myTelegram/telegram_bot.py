@@ -544,20 +544,28 @@ class TelegramBot:
                         os.makedirs("tmp_charts", exist_ok=True)
                         photo_path = f"tmp_charts/{code}_candle.png"
                         
-                        # 한국 주식 차트 색상 (상승: 빨강, 하락: 파랑)
-                        mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
-                        s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--', y_on_right=True)
-                        
                         # 한글 폰트 및 백엔드 설정 (종목명 한글 깨짐 및 GUI 세션 오류 방지)
                         import matplotlib
                         matplotlib.use('Agg')
                         import matplotlib.font_manager as fm
                         font_list = ['Malgun Gothic', 'NanumGothic', 'AppleGothic', 'sans-serif']
+                        font_family = 'sans-serif'
                         for font in font_list:
                             if any(f.name == font for f in fm.fontManager.ttflist):
-                                matplotlib.rcParams['font.family'] = font
+                                font_family = font
                                 break
-                        matplotlib.rcParams['axes.unicode_minus'] = False
+                        
+                        # 한국 주식 차트 색상 (상승: 빨강, 하락: 파랑)
+                        mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
+                        s = mpf.make_mpf_style(
+                            marketcolors=mc, 
+                            gridstyle='--', 
+                            y_on_right=True,
+                            rc={
+                                'font.family': font_family,
+                                'axes.unicode_minus': False
+                            }
+                        )
                         
                         # 차트 그리기 및 파일 저장
                         mpf.plot(
