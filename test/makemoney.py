@@ -160,6 +160,7 @@ async def main():
 
             bot.debug(False)
             await bot.connect()
+            telegram_bot.send_message("🤖 시스템이 성공적으로 재시작되었으며 Kiwoom API 연결이 완료되었습니다.")
 
             if myConfig.ENABLE_CONDITION_SEARCH:
                 await bot.api.conditional_search_list()
