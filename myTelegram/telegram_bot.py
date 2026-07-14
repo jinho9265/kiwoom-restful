@@ -548,6 +548,17 @@ class TelegramBot:
                         mc = mpf.make_marketcolors(up='red', down='blue', inherit=True)
                         s = mpf.make_mpf_style(marketcolors=mc, gridstyle='--', y_on_right=True)
                         
+                        # 한글 폰트 및 백엔드 설정 (종목명 한글 깨짐 및 GUI 세션 오류 방지)
+                        import matplotlib
+                        matplotlib.use('Agg')
+                        import matplotlib.font_manager as fm
+                        font_list = ['Malgun Gothic', 'NanumGothic', 'AppleGothic', 'sans-serif']
+                        for font in font_list:
+                            if any(f.name == font for f in fm.fontManager.ttflist):
+                                matplotlib.rcParams['font.family'] = font
+                                break
+                        matplotlib.rcParams['axes.unicode_minus'] = False
+                        
                         # 차트 그리기 및 파일 저장
                         mpf.plot(
                             df_chart, 
@@ -555,7 +566,7 @@ class TelegramBot:
                             style=s, 
                             volume=True, 
                             savefig=photo_path, 
-                            title=f"\n{code} 1-Month Trend"
+                            title=f"\n{market_data['name']} 1-Month Trend"
                         )
                     except Exception as chart_err:
                         self.logger.error(f"캔들 차트 이미지 생성 중 오류 발생: {chart_err}", exc_info=True)
