@@ -239,27 +239,41 @@ class TelegramBot:
 
         await update.message.reply_text("🔄 프로그램을 재시작합니다. 잠시만 기다려주세요...")
         
-        # 리소스 정리 (Kiwoom API 연결 종료 등)
-        if hasattr(self, 'kiwoom_bot') and self.kiwoom_bot:
-            try:
-                self.logger.info("재시작 준비: Kiwoom API 연결을 안전하게 종료합니다.")
-                await self.kiwoom_bot.close()
-            except Exception as e:
-                self.logger.error(f"Kiwoom API 종료 중 오류 발생: {e}")
+        # 백그라운드 태스크로 재시작 루틴 실행 (현재 핸들러 태스크 취소 방지)
+        asyncio.create_task(self._safe_restart())
 
-        # Telegram Bot의 Application 정리
-        if self.app:
-            try:
-                self.logger.info("재시작 준비: 텔레그램 봇을 종료합니다.")
-                await self.app.updater.stop()
-                await self.app.stop()
-                await self.app.shutdown()
-            except Exception as e:
-                self.logger.error(f"텔레그램 봇 종료 중 오류 발생: {e}")
+    async def _safe_restart(self):
+        try:
+            # 텔레그램 메시지가 완전히 전송될 수 있도록 잠시 대기
+            await asyncio.sleep(1)
+            
+            # 리소스 정리 (Kiwoom API 연결 종료 등)
+            if hasattr(self, 'kiwoom_bot') and self.kiwoom_bot:
+                try:
+                    self.logger.info("재시작 준비: Kiwoom API 연결을 안전하게 종료합니다.")
+                    await self.kiwoom_bot.close()
+                except Exception as e:
+                    self.logger.error(f"Kiwoom API 종료 중 오류 발생: {e}")
 
-        # 프로세스 교체 (execv)
-        self.logger.info("프로그램 재시작 실행 (execv)")
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+            # Telegram Bot의 Application 정리
+            if self.app:
+                try:
+                    self.logger.info("재시작 준비: 텔레그램 봇을 종료합니다.")
+                    await self.app.updater.stop()
+                    await self.app.stop()
+                    await self.app.shutdown()
+                except Exception as e:
+                    self.logger.error(f"텔레그램 봇 종료 중 오류 발생: {e}")
+        except asyncio.CancelledError:
+            self.logger.warning("재시작 태스크가 취소되었습니다. 강제 재시작을 진행합니다.")
+        finally:
+            # 프로세스 교체 (execv)
+            self.logger.info("프로그램 재시작 실행 (execv)")
+            try:
+                os.execv(sys.executable, [sys.executable] + sys.argv)
+            except Exception as e:
+                self.logger.error(f"프로그램 재시작(execv) 실패: {e}")
+                os._exit(1)
 
     async def ask_command(self, update, context):
         self.waiting_for_backtest.discard(update.effective_user.id)

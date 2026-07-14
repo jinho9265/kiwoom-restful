@@ -4,6 +4,7 @@ import asyncio
 import myConfig
 import logging
 import functools
+import os
 
 from datetime import datetime
 from kiwoom import REAL, Bot
@@ -62,9 +63,10 @@ async def handle_search_request(msg: dict, ai_engine, telegram_bot):
             # 무료 API 요청 한도(15 RPM)를 초과하지 않도록 종목당 5초씩 대기합니다.
             await asyncio.sleep(5)
 class DailyFileHandler(logging.Handler):
-    """날짜별로 다른 로그 파일(YYYYMMDD_makemoney.log)에 로깅을 기록하는 핸들러"""
-    def __init__(self, encoding="utf-8"):
+    """날짜별로 다른 로그 파일(logs/YYYYMMDD_makemoney.log)에 로깅을 기록하는 핸들러"""
+    def __init__(self, log_dir="logs", encoding="utf-8"):
         super().__init__()
+        self.log_dir = log_dir
         self.encoding = encoding
         self.current_date = None
         self._handler = None
@@ -76,7 +78,8 @@ class DailyFileHandler(logging.Handler):
                 self.current_date = log_date
                 if self._handler:
                     self._handler.close()
-                filename = f"{log_date}_makemoney.log"
+                os.makedirs(self.log_dir, exist_ok=True)
+                filename = os.path.join(self.log_dir, f"{log_date}_makemoney.log")
                 self._handler = logging.FileHandler(filename, encoding=self.encoding)
                 if self.formatter:
                     self._handler.setFormatter(self.formatter)
