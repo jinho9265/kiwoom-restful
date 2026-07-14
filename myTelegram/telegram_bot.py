@@ -174,7 +174,7 @@ class TelegramBot:
         if self.app:
             await self.app.initialize()
             await self.app.start()
-            await self.app.updater.start_polling()
+            await self.app.updater.start_polling(drop_pending_updates=True)
             self.logger.info("텔레그램 명령어 수신 대기(Polling) 시작...")
 
     async def setup_handlers(self, kiwoom_bot, ai_engine, market_monitor):
