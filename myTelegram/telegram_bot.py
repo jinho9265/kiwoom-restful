@@ -14,11 +14,18 @@ import sys
 from myBacktest import Backtester
 
 
+_instance = None
+
+def get_instance():
+    return _instance
+
 class TelegramBot:
     """
     텔레그램으로 메시지를 보내는 클래스 (asyncio 호환)
     """
     def __init__(self):
+        global _instance
+        _instance = self
         """
         봇 인스턴스를 초기화합니다.
         """

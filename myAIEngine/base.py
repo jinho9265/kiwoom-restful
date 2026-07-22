@@ -47,7 +47,15 @@ class BaseAIEngine(ABC):
                         return self.parse_response(result)
             except aiohttp.ClientResponseError as e:
                 if e.status == 429:
-                    print(f"API 요청 한도 초과(429). {15 * (i + 1)}초 대기 후 재시도합니다...")
+                    msg = f"API 요청 한도 초과(429). {15 * (i + 1)}초 대기 후 재시도합니다..."
+                    print(msg)
+                    try:
+                        from myTelegram.telegram_bot import get_instance
+                        tg_bot = get_instance()
+                        if tg_bot:
+                            tg_bot.send_message(f"⚠️ {msg}")
+                    except Exception as tg_err:
+                        print(f"텔레그램 메시지 전송 실패: {tg_err}")
                     await asyncio.sleep(15 * (i + 1))
                     continue
                 if i == 5:
