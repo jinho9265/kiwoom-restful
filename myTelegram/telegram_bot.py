@@ -66,7 +66,11 @@ class TelegramBot:
 
     async def error_handler(self, update: object, context) -> None:
         """봇 내부 또는 폴링 중에 발생한 오류를 처리하고 기록합니다."""
-        self.logger.error("텔레그램 봇 내부 오류 발생: %s", context.error, exc_info=context.error)
+        # 일시적인 네트워크 오류(NetworkError, TimedOut)는 Warning 수준으로만 남겨 로그 남용을 방지합니다.
+        if isinstance(context.error, (telegram.error.NetworkError, telegram.error.TimedOut)):
+            self.logger.warning("텔레그램 네트워크 오류 발생 (자동 재시도 예정): %s", context.error)
+        else:
+            self.logger.error("텔레그램 봇 내부 오류 발생: %s", context.error, exc_info=context.error)
 
     def send_photo(self, photo_path, caption="", parse_mode="Markdown"):
         """
@@ -84,13 +88,32 @@ class TelegramBot:
                 # 쉼표로 구분된 여러 채팅 ID를 리스트로 분리합니다.
                 chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
                 for chat_id in chat_ids:
-                    try:
-                        with open(photo_path, 'rb') as photo:
-                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode=parse_mode)
-                    except Exception as parse_err:
-                        self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
-                        with open(photo_path, 'rb') as photo:
-                            await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption)
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            with open(photo_path, 'rb') as photo:
+                                await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption, parse_mode=parse_mode)
+                            break  # 성공 시 재시도 루프 탈출
+                        except (telegram.error.NetworkError, telegram.error.TimedOut) as net_err:
+                            if attempt < max_retries - 1:
+                                self.logger.warning(
+                                    f"텔레그램 사진 전송 중 네트워크 오류 발생 (재시도 {attempt+1}/{max_retries}): {net_err}"
+                                )
+                                await asyncio.sleep(2 ** attempt)  # 지수 백오프 (1초, 2초)
+                            else:
+                                raise net_err
+                        except telegram.error.BadRequest as req_err:
+                            # 마크다운 파싱 에러(BadRequest: can't parse entities)인 경우 마크다운 없이 재시도
+                            if parse_mode and ("can't parse entities" in str(req_err).lower() or "bad request" in str(req_err).lower()):
+                                self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 사진을 재전송합니다. 오류: {req_err}")
+                                try:
+                                    with open(photo_path, 'rb') as photo:
+                                        await self.app.bot.send_photo(chat_id=chat_id, photo=photo, caption=caption)
+                                    break
+                                except Exception as retry_err:
+                                    raise retry_err
+                            else:
+                                raise req_err
                 self.logger.info(f"텔레그램 사진 발송 성공 (경로: {photo_path})")
             except Exception as e:
                 self.logger.error(f"텔레그램 사진 발송 실패: {e}")
@@ -122,11 +145,30 @@ class TelegramBot:
                 # 쉼표로 구분된 여러 채팅 ID를 리스트로 분리합니다.
                 chat_ids = [cid.strip() for cid in myConfig.TELEGRAM_CHAT_ID.split(',') if cid.strip()]
                 for chat_id in chat_ids:
-                    try:
-                        await self.app.bot.send_message(chat_id=chat_id, text=message, parse_mode=parse_mode)
-                    except Exception as parse_err:
-                        self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 재전송합니다. 오류: {parse_err}")
-                        await self.app.bot.send_message(chat_id=chat_id, text=message)
+                    max_retries = 3
+                    for attempt in range(max_retries):
+                        try:
+                            await self.app.bot.send_message(chat_id=chat_id, text=message, parse_mode=parse_mode)
+                            break  # 성공 시 재시도 루프 탈출
+                        except (telegram.error.NetworkError, telegram.error.TimedOut) as net_err:
+                            if attempt < max_retries - 1:
+                                self.logger.warning(
+                                    f"텔레그램 메시지 전송 중 네트워크 오류 발생 (재시도 {attempt+1}/{max_retries}): {net_err}"
+                                )
+                                await asyncio.sleep(2 ** attempt)  # 지수 백오프 (1초, 2초)
+                            else:
+                                raise net_err
+                        except telegram.error.BadRequest as req_err:
+                            # 마크다운 파싱 에러(BadRequest: can't parse entities)인 경우 마크다운 없이 재시도
+                            if parse_mode and ("can't parse entities" in str(req_err).lower() or "bad request" in str(req_err).lower()):
+                                self.logger.warning(f"마크다운 파싱 실패로 일반 텍스트 포맷으로 메시지를 재전송합니다. 오류: {req_err}")
+                                try:
+                                    await self.app.bot.send_message(chat_id=chat_id, text=message)
+                                    break
+                                except Exception as retry_err:
+                                    raise retry_err
+                            else:
+                                raise req_err
                 self.logger.info(f"텔레그램 메시지 발송 성공 (포맷: {parse_mode})")
             except Exception as e:
                 self.logger.error(f"텔레그램 메시지 발송 실패: {e}")
@@ -156,9 +198,12 @@ class TelegramBot:
         commands: [("명령어", "설명"), ...] 형태의 리스트
         """
         if self.app:
-            bot_commands = [telegram.BotCommand(cmd, desc) for cmd, desc in commands]
-            await self.app.bot.set_my_commands(bot_commands)
-            #print("텔레그램 메뉴 버튼 설정 완료.")
+            try:
+                bot_commands = [telegram.BotCommand(cmd, desc) for cmd, desc in commands]
+                await self.app.bot.set_my_commands(bot_commands)
+                self.logger.info("텔레그램 메뉴 버튼 설정 완료.")
+            except Exception as e:
+                self.logger.warning(f"텔레그램 메뉴 버튼 설정 실패 (무시하고 진행): {e}")
 
     def add_command_handler(self, command: str, handler):
         """
